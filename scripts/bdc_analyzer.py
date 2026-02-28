@@ -141,7 +141,8 @@ def parse_candidate_table(tbl, context_year=None):
 
     def pick_series(frame, col):
         out = frame[col]
-        if isinstance(out, pd.DataFrame): return out.iloc[:, 0]
+        if isinstance(out, pd.DataFrame): 
+            return out.apply(lambda row: ' '.join(row.fillna('').astype(str)), axis=1)
         return out
 
     out = pd.DataFrame({
@@ -241,6 +242,64 @@ def add_simple_business_intro(df):
     df['业务简介'] = df['CompanyKey'].apply(intro)
     return df
 
+def parse_htgc_table(tbl):
+    text = tbl.get_text(' ', strip=True).lower()
+    if 'value' not in text or 'cost' not in text or 'principal' not in text: return None
+    try: df = pd.read_html(StringIO(str(tbl)))[0]
+    except: return None
+    if len(df) < 5: return None
+    
+    header_idx = None
+    for i in range(min(12, len(df))):
+        row = ' '.join([str(v).lower() for v in df.iloc[i].values])
+        if 'value' in row and ('cost' in row or 'principal' in row):
+            header_idx = i
+            break
+    if header_idx is None: return None
+    cols = [str(v).strip().lower().replace('\n', ' ') for v in df.iloc[header_idx].values]
+    df.columns = cols
+    df = df.iloc[header_idx + 1:].copy()
+    
+    company_col = None; cost_col = None; fv_col = None
+    for c in df.columns:
+        if company_col is None and ('portfolio company' in c): company_col = c
+        elif fv_col is None and ('value' in c and 'fair' not in c and 'par' not in c): fv_col = c
+        elif cost_col is None and ('cost' in c): cost_col = c
+    if not (company_col and cost_col and fv_col): return None
+    
+    def pick_s(frame, col):
+        out = frame[col]
+        if isinstance(out, pd.DataFrame): 
+            return out.apply(lambda row: ' '.join(row.fillna('').astype(str)), axis=1)
+        return out
+        
+    out = pd.DataFrame({'Company': pick_s(df, company_col), 'Face': pick_s(df, cost_col), 'Fair': pick_s(df, fv_col)})
+    out['Company'] = out['Company'].astype(str).str.replace(r'\n', ' ', regex=True).str.strip()
+    out = out[out['Company'].apply(is_valid_company)]
+    out['Face'] = out['Face'].apply(clean_num)
+    out['Fair'] = out['Fair'].apply(clean_num)
+    out = out.dropna(subset=['Face', 'Fair'], how='all')
+    out = out[out['Face'] > 0]
+    out['CompanyKey'] = out['Company'].apply(normalize_company)
+    return out.groupby('CompanyKey', as_index=False).agg({'Face': 'sum', 'Fair': 'sum'})
+
+def extract_htgc_style_table(url):
+    import warnings
+    from bs4 import XMLParsedAsHTMLWarning
+    warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
+    
+    res = requests.get(url, headers=get_headers(), timeout=120)
+    res.raise_for_status()
+    soup = BeautifulSoup(res.content, 'lxml')
+    frames = []
+    for t in soup.find_all('table'):
+        df = parse_htgc_table(t)
+        if df is not None and len(df) > 0: frames.append(df)
+    if not frames:
+        return pd.DataFrame(columns=['CompanyKey', 'Face', 'Fair'])
+    final = pd.concat(frames, ignore_index=True)
+    return final.groupby('CompanyKey', as_index=False).agg({'Face': 'sum', 'Fair': 'sum'})
+
 def analyze(ticker):
     cik = get_cik(ticker)
     equity_usd = get_shareholder_equity(cik)
@@ -250,6 +309,21 @@ def analyze(ticker):
 
     url = fetch_latest_10k_url(cik, filing_year=2026)
     df25, df24 = extract_two_year_tables(url)
+
+    if len(df25) == 0:
+        print("Falling back to HTGC-style single year extraction for 2025...")
+        df25 = extract_htgc_style_table(url)
+    if len(df24) == 0:
+        try:
+            url_prior = fetch_latest_10k_url(cik, filing_year=2025)
+            print("Falling back to prior year 10-K extraction for 2024...")
+            _, df24_attempt = extract_two_year_tables(url_prior)
+            if len(df24_attempt) > 0:
+                df24 = df24_attempt
+            else:
+                df24 = extract_htgc_style_table(url_prior)
+        except Exception as e:
+            print("Warning: Could not fetch prior 10-K for 2024 data:", e)
 
     if df25['Face'].median() < 1000000:
         table_scale = 1000
