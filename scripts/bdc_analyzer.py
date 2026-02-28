@@ -1,266 +1,292 @@
 import os
+import re
 import sys
-import requests
-import argparse
-import pandas as pd
+from io import StringIO
+
 import numpy as np
+import pandas as pd
+import requests
 from bs4 import BeautifulSoup
 from tabulate import tabulate
-import re
 
-pd.set_option('display.max_columns', None)
-pd.set_option('display.max_rows', 500)
-pd.set_option('display.width', 1000)
 
 def get_headers():
-    # Retrieve EDGAR identity from environment, or fallback to a default (SEC requires a User-Agent)
     user_agent = os.environ.get('EDGAR_IDENTITY', 'OpenClaw-BDC-Analyst <admin@openclaw.ai>')
     return {'User-Agent': user_agent}
 
+
 def get_cik(ticker):
-    res = requests.get("https://www.sec.gov/files/company_tickers.json", headers=get_headers())
-    if res.status_code != 200:
-        print("Failed to fetch CIK list from SEC.")
-        sys.exit(1)
-        
+    res = requests.get("https://www.sec.gov/files/company_tickers.json", headers=get_headers(), timeout=60)
+    res.raise_for_status()
     data = res.json()
-    for k, v in data.items():
+    for _, v in data.items():
         if v['ticker'].upper() == ticker.upper():
             return str(v['cik_str']).zfill(10)
-    print(f"Ticker {ticker} not found.")
-    sys.exit(1)
+    raise ValueError(f"Ticker {ticker} not found")
 
-def fetch_10k_html_url(cik, filing_year):
-    res = requests.get(f"https://data.sec.gov/submissions/CIK{cik}.json", headers=get_headers())
-    if res.status_code != 200:
-        return None
-        
+
+def fetch_latest_10k_url(cik, filing_year=2026):
+    res = requests.get(f"https://data.sec.gov/submissions/CIK{cik}.json", headers=get_headers(), timeout=60)
+    res.raise_for_status()
     filings = res.json()['filings']['recent']
-    
     for i, form in enumerate(filings['form']):
-        if form == '10-K':
-            filing_date = filings['filingDate'][i]
-            if filing_date.startswith(str(filing_year)):
-                acc_no = filings['accessionNumber'][i]
-                primary_doc = filings['primaryDocument'][i]
-                acc_no_no_dash = acc_no.replace('-', '')
-                return f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{acc_no_no_dash}/{primary_doc}"
-    return None
+        if form == '10-K' and str(filings['filingDate'][i]).startswith(str(filing_year)):
+            acc = filings['accessionNumber'][i].replace('-', '')
+            doc = filings['primaryDocument'][i]
+            return f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{acc}/{doc}"
+    raise ValueError(f"No {filing_year} 10-K found")
 
-def clean_value(val):
-    if pd.isna(val):
+
+def clean_num(x):
+    if pd.isna(x):
         return np.nan
-    val_str = str(val).strip()
-    if not val_str or val_str in ['-', '—', '$']:
+    s = str(x).strip()
+    if not s or s in ['-', '—', '$']:
         return np.nan
-    
-    # Remove non-numeric chars except minus, parens, dot
-    val_str = re.sub(r'[^\d\.\(\)-]', '', val_str)
-    
-    if val_str == '':
+    s = re.sub(r'[^\d\.\(\)-]', '', s)
+    if not s:
         return np.nan
-        
-    # Handle accounting negatives
-    if val_str.startswith('(') and val_str.endswith(')'):
-        val_str = '-' + val_str[1:-1]
-    
+    if s.startswith('(') and s.endswith(')'):
+        s = '-' + s[1:-1]
     try:
-        # Some tables are in thousands, some in millions. SEC text usually raw digits if it's in the table.
-        return float(val_str)
-    except ValueError:
+        return float(s)
+    except Exception:
         return np.nan
 
-def extract_schedule_of_investments(html_url):
-    print(f"  Fetching HTML: {html_url}")
-    res = requests.get(html_url, headers=get_headers())
-    if res.status_code != 200:
-        print("  Failed to download HTML.")
-        return pd.DataFrame()
-        
-    print("  Parsing HTML (this may take a moment)...")
+
+def normalize_company(name):
+    s = str(name)
+    s = re.sub(r'\(.*?\)', '', s)
+    s = re.sub(r'\s+', ' ', s).strip()
+    return s.upper()
+
+
+def parse_candidate_table(tbl, context_year=None):
+    text = tbl.get_text(' ', strip=True).lower()
+    if 'fair value' not in text:
+        return None, None
+    if 'amortized cost' not in text and 'cost' not in text and 'principal' not in text:
+        return None, None
+
+    # detect table year from caption/body text; fallback to section context
+    year = None
+    if 'december 31, 2025' in text or 'as of december 31, 2025' in text:
+        year = 2025
+    elif 'december 31, 2024' in text or 'as of december 31, 2024' in text:
+        year = 2024
+    elif context_year in (2025, 2024):
+        year = context_year
+
+    try:
+        df = pd.read_html(StringIO(str(tbl)))[0]
+    except Exception:
+        return None, year
+
+    if len(df) < 20:
+        return None, year
+
+    df = df.dropna(axis=1, how='all')
+
+    header_idx = None
+    for i in range(min(12, len(df))):
+        row = ' '.join([str(v).lower() for v in df.iloc[i].values])
+        if 'fair value' in row and ('cost' in row or 'principal' in row):
+            header_idx = i
+            break
+    if header_idx is None:
+        return None, year
+
+    cols = [str(v).strip().lower().replace('\n', ' ') for v in df.iloc[header_idx].values]
+    df.columns = cols
+    df = df.iloc[header_idx + 1:].copy()
+
+    # pick columns
+    company_col = None
+    cost_col = None
+    fv_col = None
+    amortized_candidates = []
+    generic_cost_candidates = []
+    principal_candidates = []
+
+    for c in df.columns:
+        lc = str(c).lower()
+        if company_col is None and ('portfolio company' in lc or 'issuer' in lc or 'investment' in lc or lc == cols[0]):
+            company_col = c
+        if fv_col is None and 'fair value' in lc:
+            fv_col = c
+        if 'amortized cost' in lc:
+            amortized_candidates.append(c)
+        elif 'cost' in lc:
+            generic_cost_candidates.append(c)
+        elif 'principal' in lc:
+            principal_candidates.append(c)
+
+    if amortized_candidates:
+        cost_col = amortized_candidates[0]
+    elif generic_cost_candidates:
+        cost_col = generic_cost_candidates[0]
+    elif principal_candidates:
+        cost_col = principal_candidates[0]
+
+    if company_col is None or cost_col is None or fv_col is None:
+        return None, year
+
+    def pick_series(frame, col):
+        out = frame[col]
+        if isinstance(out, pd.DataFrame):
+            return out.iloc[:, 0]
+        return out
+
+    out = pd.DataFrame({
+        'Company': pick_series(df, company_col),
+        'Face': pick_series(df, cost_col),
+        'Fair': pick_series(df, fv_col),
+    })
+
+    out['Company'] = out['Company'].astype(str).str.replace(r'\n', ' ', regex=True).str.strip()
+    out = out[out['Company'].str.len() > 1]
+    out = out[~out['Company'].str.lower().str.contains('total|subtotal|schedule of investments|interest rate')]
+
+    out['Face'] = out['Face'].apply(clean_num)
+    out['Fair'] = out['Fair'].apply(clean_num)
+    out = out.dropna(subset=['Face', 'Fair'], how='all')
+    out = out[out['Face'] > 0]
+    out['CompanyKey'] = out['Company'].apply(normalize_company)
+
+    # exact-name aggregation only (avoid aggressive base-name compression)
+    out = out.groupby('CompanyKey', as_index=False).agg({'Face': 'sum', 'Fair': 'sum'})
+    return out, year
+
+
+def extract_two_year_tables(url):
+    res = requests.get(url, headers=get_headers(), timeout=120)
+    res.raise_for_status()
     soup = BeautifulSoup(res.content, 'lxml')
     tables = soup.find_all('table')
-    
-    print(f"  Found {len(tables)} tables. Identifying Schedule of Investments...")
-    
-    all_data = []
-    
+
+    context_year = None
+    parsed_records = []  # (idx, parsed_df, year_or_none)
+
     for idx, tbl in enumerate(tables):
-        # We need a table that's large and has characteristic headers
-        text = tbl.get_text().lower()
-        if 'portfolio company' not in text and 'investment' not in text:
-            continue
-        if 'fair value' not in text and 'amortized cost' not in text:
-            continue
-            
-        rows = tbl.find_all('tr')
-        if len(rows) < 30: # SoI tables are usually huge
-            continue
-            
-        # Parse it with pandas to utilize its HTML table parsing capabilities for colspans etc.
-        try:
-            from io import StringIO
-            dfs = pd.read_html(StringIO(str(tbl)))
-            if not dfs: continue
-            df = dfs[0]
-        except Exception as e:
-            continue
-            
-        # Drop columns that are mostly empty
-        df = df.dropna(axis=1, how='all')
-        
-        # Determine the header row. We look for 'Fair Value'
-        header_row_idx = -1
-        for i in range(min(10, len(df))):
-            row_str = ' '.join([str(x).lower() for x in df.iloc[i].values])
-            if 'fair value' in row_str and ('cost' in row_str or 'principal' in row_str):
-                header_row_idx = i
-                break
-                
-        if header_row_idx == -1:
-            continue
-            
-        # Flatten multi-index columns if present, otherwise just pick the best header
-        cols = []
-        for i, val in enumerate(df.iloc[header_row_idx].values):
-            cols.append(str(val).lower().replace('\n', ' ').strip())
-        df.columns = cols
-        
-        # Only keep data below header
-        df = df.iloc[header_row_idx+1:].copy()
-        
-        # Identify columns
-        comp_col = None
-        cost_col = None
-        fv_col = None
-        
-        # The first non-empty text column is usually the company name or investment description
-        for col in df.columns:
-            if 'company' in col or 'investment' in col or 'issuer' in col:
-                comp_col = col
-                break
-        if not comp_col:
-            comp_col = df.columns[0] # Fallback
-            
-        for col in df.columns:
-            if 'cost' in col:
-                cost_col = col
-            if 'fair value' in col:
-                fv_col = col
-                
-        if not (comp_col and cost_col and fv_col):
-            continue
-            
-        # Extract subset carefully handling duplicate column names
-        def safe_get_col(df, col_name):
-            extracted = df[col_name]
-            if isinstance(extracted, pd.DataFrame):
-                return extracted.iloc[:, 0]
-            return extracted
+        txt = tbl.get_text(' ', strip=True).lower()
+        # track section context for split SoI tables
+        if 'consolidated schedule of investments' in txt or 'schedule of investments' in txt:
+            if 'december 31, 2025' in txt:
+                context_year = 2025
+            elif 'december 31, 2024' in txt:
+                context_year = 2024
 
-        comp_s = safe_get_col(df, comp_col)
-        cost_s = safe_get_col(df, cost_col)
-        fv_s = safe_get_col(df, fv_col)
-        
-        sub = pd.DataFrame({'Company': comp_s, 'Cost': cost_s, 'Fair_Value': fv_s})
-        all_data.append(sub)
+        parsed, year = parse_candidate_table(tbl, context_year=context_year)
+        if parsed is None:
+            continue
+        parsed_records.append((idx, parsed, year))
 
-    if not all_data:
-        return pd.DataFrame()
-        
-    master_df = pd.concat(all_data, ignore_index=True)
-    
-    # Cleaning
-    master_df['Company'] = master_df['Company'].astype(str).str.strip().str.replace(r'\n', ' ', regex=True)
-    master_df['Company'] = master_df['Company'].str.replace(r'\(.*?\)', '', regex=True) # remove footnotes (1)(2)
-    master_df = master_df[master_df['Company'] != 'nan']
-    
-    # Ignore subtotals
-    master_df = master_df[~master_df['Company'].str.lower().str.contains('total')]
-    master_df = master_df[~master_df['Company'].str.lower().str.contains('subtotal')]
-    master_df = master_df[master_df['Company'].str.len() > 2] # Ignore weird 1-char parsed strings
-    
-    master_df['Cost'] = master_df['Cost'].apply(clean_value)
-    master_df['Fair_Value'] = master_df['Fair_Value'].apply(clean_value)
-    
-    # Drop where both are null
-    master_df.dropna(subset=['Cost', 'Fair_Value'], how='all', inplace=True)
-    
-    # Group by company name. Because BDCs break loans into Tranches (e.g. "First Lien Term Loan"),
-    # grouping by the first part of the company name usually aggregates the whole exposure.
-    # We will grab the first 2-3 words of the company string to group tranches.
-    
-    def get_base_name(name):
-        # Extremely rough heuristic: take first two words and strip non-alpha
-        words = name.split()
-        if len(words) >= 2:
-            base = words[0] + " " + words[1]
+    year_frames = {2025: [], 2024: []}
+
+    # 1) use explicit year-tagged tables first
+    unknown = []
+    for idx, df, year in parsed_records:
+        if year in (2025, 2024):
+            year_frames[year].append(df)
         else:
-            base = words[0]
-        return re.sub(r'[^A-Za-z0-9 ]', '', base).upper().strip()
+            unknown.append((idx, df))
 
-    master_df['Base_Company'] = master_df['Company'].apply(get_base_name)
-    
-    agg = master_df.groupby('Base_Company', as_index=False).agg({'Cost': 'sum', 'Fair_Value': 'sum'})
-    agg = agg[agg['Cost'] > 0] # Filter valid rows
-    return agg
+    # 2) if many unknown tables exist (FSK case), split them into two index clusters:
+    #    first cluster -> 2025 table block, second cluster -> 2024 table block.
+    if unknown:
+        unknown = sorted(unknown, key=lambda x: x[0])
+        clusters = []
+        cur = [unknown[0]]
+        for rec in unknown[1:]:
+            if rec[0] - cur[-1][0] <= 10:
+                cur.append(rec)
+            else:
+                clusters.append(cur)
+                cur = [rec]
+        clusters.append(cur)
+
+        # take two largest clusters by length, then order by index
+        clusters = sorted(clusters, key=lambda c: len(c), reverse=True)[:2]
+        clusters = sorted(clusters, key=lambda c: c[0][0])
+
+        if len(clusters) >= 1:
+            for _, df in clusters[0]:
+                year_frames[2025].append(df)
+        if len(clusters) >= 2:
+            for _, df in clusters[1]:
+                year_frames[2024].append(df)
+
+    final = {}
+    for y in [2025, 2024]:
+        if not year_frames[y]:
+            final[y] = pd.DataFrame(columns=['CompanyKey', 'Face', 'Fair'])
+        else:
+            tmp = pd.concat(year_frames[y], ignore_index=True)
+            tmp = tmp.groupby('CompanyKey', as_index=False).agg({'Face': 'sum', 'Fair': 'sum'})
+            final[y] = tmp
+    return final[2025], final[2024]
+
+
+def add_simple_business_intro(df):
+    # lightweight rule-based one-liners by name keywords (no hallucinated deep specifics)
+    def intro(name):
+        n = name.lower()
+        if 'medallia' in n:
+            return '客户体验管理（CXM）软件平台。'
+        if 'peraton' in n:
+            return '国防与政府IT服务承包商。'
+        if 'global jet' in n:
+            return '公务航空相关融资与服务。'
+        if 'lionbridge' in n:
+            return '本地化与语言技术服务提供商。'
+        if 'dental' in n:
+            return '牙科医疗服务或相关诊疗网络。'
+        if 'networks' in n:
+            return '通信网络设备与基础设施相关业务。'
+        return '年报持仓项对应的企业借款主体。'
+
+    df['业务简介'] = df['CompanyKey'].apply(intro)
+    return df
+
 
 def analyze(ticker):
-    print(f"[{ticker}] Looking up CIK...")
+    print(f"[{ticker}] Resolving CIK...")
     cik = get_cik(ticker)
-    
-    print(f"[{ticker}] Processing 2025 Year-End Data (Filed in early 2026)...")
-    url_2026 = fetch_10k_html_url(cik, 2026)
-    if not url_2026:
-        print("  Could not find 2026 filing.")
-        sys.exit(1)
-    df_2025 = extract_schedule_of_investments(url_2026)
-    df_2025.rename(columns={'Cost': 'Cost_2025', 'Fair_Value': 'FV_2025'}, inplace=True)
-    
-    print(f"\n[{ticker}] Processing 2024 Year-End Data (Filed in early 2025)...")
-    url_2025 = fetch_10k_html_url(cik, 2025)
-    if not url_2025:
-        print("  Could not find 2025 filing.")
-        sys.exit(1)
-    df_2024 = extract_schedule_of_investments(url_2025)
-    df_2024.rename(columns={'Cost': 'Cost_2024', 'Fair_Value': 'FV_2024'}, inplace=True)
-    
-    if df_2025.empty or df_2024.empty:
-        print("Failed to extract data for one or both years.")
-        sys.exit(1)
-        
-    print(f"\n[{ticker}] Merging and comparing the two years...")
-    
-    merged = pd.merge(df_2025, df_2024, on='Base_Company', how='inner')
-    
-    if merged.empty:
-        print("No matching companies found between the two years. Parsing might have failed to align.")
-        sys.exit(1)
-        
-    merged['Unrealized_Depr_2024'] = merged['FV_2024'] - merged['Cost_2024']
-    merged['Unrealized_Depr_2025'] = merged['FV_2025'] - merged['Cost_2025']
-    
-    # We want to find the ones where Unrealized Depreciation WORSENED the most in absolute dollars
-    # A negative number means Fair Value < Cost. Worsening means 2025 is MORE negative than 2024.
-    merged['Depr_Change'] = merged['Unrealized_Depr_2025'] - merged['Unrealized_Depr_2024']
-    
-    # Filter only assets that are actually underwater in 2025
-    underwater = merged[merged['Unrealized_Depr_2025'] < 0]
-    
-    # Sort by the most negative change (deterioration)
-    worst = underwater.sort_values(by='Depr_Change', ascending=True).head(15)
-    
-    res_table = worst[['Base_Company', 'Cost_2024', 'FV_2024', 'Unrealized_Depr_2024', 
-                       'Cost_2025', 'FV_2025', 'Unrealized_Depr_2025', 'Depr_Change']]
-                       
-    print(f"\n==========================================================================")
-    print(f"Top 15 Companies by Deterioration of Unrealized Depreciation ({ticker})")
-    print(f"Comparing 2024 Year-End to 2025 Year-End")
-    print(f"==========================================================================\n")
-    print(tabulate(res_table, headers='keys', tablefmt='psql', showindex=False, floatfmt=".2f"))
+    print(f"[{ticker}] Fetching 2026-filed 10-K (contains 2025 & 2024 tables)...")
+    url = fetch_latest_10k_url(cik, filing_year=2026)
+    print(f"[{ticker}] 10-K URL: {url}")
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='BDC Asset Depreciation Analyzer (HTML Parser)')
-    parser.add_argument("--ticker", required=True, help='Stock ticker of the BDC')
-    args = parser.parse_args()
+    df25, df24 = extract_two_year_tables(url)
+    if df25.empty or df24.empty:
+        print("Failed to extract one of the two year tables (2025/2024) from the same 10-K.")
+        sys.exit(1)
+
+    merged = pd.merge(df25, df24, on='CompanyKey', how='inner', suffixes=('_2025', '_2024'))
+    merged = merged[(merged['Face_2025'] > 0) & (merged['Face_2024'] > 0)]
+
+    merged['ratio_2025'] = merged['Fair_2025'] / merged['Face_2025']
+    merged['ratio_2024'] = merged['Fair_2024'] / merged['Face_2024']
+    merged['ratio_change'] = merged['ratio_2025'] - merged['ratio_2024']
+
+    # sort by worsening in fair/face ratio
+    out = merged.sort_values('ratio_change', ascending=True).head(20).copy()
+    out = add_simple_business_intro(out)
+
+    show = out[[
+        'CompanyKey', 'Face_2025', 'Fair_2025', 'ratio_2025',
+        'Face_2024', 'Fair_2024', 'ratio_2024', 'ratio_change', '业务简介'
+    ]]
+
+    print("\n====================================================================")
+    print(f"{ticker} | 2025 vs 2024 (same 2025 annual report) | Sorted by ratio change")
+    print("ratio_change = (fair/face)_2025 - (fair/face)_2024")
+    print("====================================================================\n")
+    print(tabulate(show, headers='keys', tablefmt='psql', showindex=False, floatfmt='.4f'))
+
+
+if __name__ == '__main__':
+    import argparse
+    p = argparse.ArgumentParser()
+    p.add_argument('--ticker', required=True)
+    args = p.parse_args()
     analyze(args.ticker)
