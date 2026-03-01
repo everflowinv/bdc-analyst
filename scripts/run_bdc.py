@@ -5,6 +5,12 @@ PROFILE_MAP = {
     'MFIC': 'bdc_profiles.mfic',
     'ARCC': 'bdc_profiles.arcc',
     'OBDC': 'bdc_profiles.obdc',
+    'BXSL': 'bdc_profiles.bxsl',
+    'MAIN': 'bdc_profiles.main',
+    'GBDC': 'bdc_profiles.gbdc',
+    'FSK': 'bdc_profiles.fsk',
+    'HTGC': 'bdc_profiles.htgc',
+    'TSLX': 'bdc_profiles.tslx',
 }
 
 

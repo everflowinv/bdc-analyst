@@ -11,9 +11,9 @@ This skill allows the agent to download and parse the raw SEC HTML 10-K filings 
 Use when a user asks to see which loans or assets inside a BDC's portfolio (like FSK, ARCC, MAIN, OBDC, OTF) have deteriorated the most year-over-year based on Fair Value to Face Value (or Amortized Cost) ratios.
 
 ## Core Logic & Filtering
-- **Significant Assets Only**: Automatically fetches the BDC's Shareholder Equity and filters out any loans where the Face Value is less than **0.5%** of the total Shareholder Equity to remove long-tail noise.
+- **Significant Assets Only**: Automatically fetches the BDC's Shareholder Equity and filters out any loans where the Face Value is less than **0.2%** of the total Shareholder Equity to remove long-tail noise.
 - **Clean Aggregation**: Excludes summary rows (e.g., "Total Asset Based Finance", "Net Asset Based Finance", Subtotals) and aggregates loan tranches by base company.
-- **Deterioration Ranking**: Sorts the portfolio descending by the largest drop in the `Fair Value / Face Value` ratio from 2024 to 2025. Extracts the **top 20 worst deteriorating assets** (where the ratio drop > 0).
+- **Deterioration Ranking**: Sorts the portfolio descending by the largest drop in the `Fair Value / Face Value` ratio from 2024 to 2025. Extracts the **top 20 worst deteriorating assets** (where the ratio drop > 0), and excludes names with `2025 Fair/Face > 100%` from the final ranking list.
 
 ## Usage
 Use the bash command:

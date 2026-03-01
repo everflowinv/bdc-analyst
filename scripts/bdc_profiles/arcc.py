@@ -8,6 +8,7 @@ from tabulate import tabulate
 from bdc_analyzer import (
     get_headers,
     get_cik,
+    get_shareholder_equity,
     fetch_latest_10k_url,
     clean_num,
     normalize_company,
@@ -144,6 +145,7 @@ def _extract_arcc_company_rows(url):
 
 def analyze(ticker):
     cik = get_cik(ticker)
+    equity_usd = get_shareholder_equity(cik) or 1000000000
     url = fetch_latest_10k_url(cik, filing_year=2026)
 
     raw = _extract_arcc_company_rows(url)
@@ -163,13 +165,14 @@ def analyze(ticker):
     merged['Face_2024_M'] = merged['Face_2024']
     merged['Fair_2024_M'] = merged['Fair_2024']
 
-    merged = merged[merged['Face_2025_M'] > 5]
+    threshold_m = (equity_usd / 1000000) * 0.002
+    merged = merged[merged['Face_2025_M'] > threshold_m]
 
     merged['ratio_2025'] = merged['Fair_2025_M'] / merged['Face_2025_M']
     merged['ratio_2024'] = merged['Fair_2024_M'] / merged['Face_2024_M']
     merged['ratio_drop'] = merged['ratio_2024'] - merged['ratio_2025']
 
-    out = merged[merged['ratio_drop'] > 0].sort_values('ratio_drop', ascending=False).head(20).copy()
+    out = merged[(merged['ratio_drop'] > 0) & (merged['ratio_2025'] <= 1.0)].sort_values('ratio_drop', ascending=False).head(20).copy()
     out = add_simple_business_intro(out)
 
     out['Face_2025_fmt'] = out['Face_2025_M'].map('{:.2f}'.format)

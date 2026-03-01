@@ -60,47 +60,49 @@ def _display_name_key(name: str) -> str:
 
 
 def _enrich_business_intro(df: pd.DataFrame) -> pd.DataFrame:
-    """Rule-based business intro enrichment for common OBDC names."""
+    """Rule-based business intro enrichment for common BXSL names."""
     def intro(name: str) -> str:
         n = (name or '').upper()
-        if 'CONAIR' in n:
-            return '个人护理小家电制造与分销（如美发、美容电器），覆盖零售与电商渠道。'
-        if 'NATIONAL DENTEX' in n or 'BARRACUDA DENTAL' in n:
-            return '牙科实验室平台，为牙科诊所提供义齿、修复体与数字化加工服务。'
-        if 'TRUCORDIA' in n or 'PCF HOLDCO' in n:
-            return '保险经纪与风险管理服务平台，面向企业和个人客户提供保险分销服务。'
-        if 'PURPOSEBUILT BRANDS' in n or 'WU HOLDCO' in n:
-            return '家居与清洁维护类消费品品牌平台，主要面向零售终端销售。'
-        if 'FERADYNE' in n:
-            return '户外运动装备公司，核心品类包括弓猎/射箭相关产品。'
-        if 'PLURALSIGHT' in n or 'PLI' in n:
-            return '企业级数字技能培训平台，提供开发与IT学习内容订阅服务。'
-        if 'STS AVIATION' in n or 'STS PARENT' in n:
-            return '航空MRO与工程服务商，提供飞机维修、航材与技术支持服务。'
-        if 'PETVET' in n:
-            return '宠物医疗连锁平台，提供诊疗、手术与日常健康管理服务。'
-        if 'MAVIS TIRE' in n or 'METIS HOLDCO' in n:
-            return '汽车后市场服务平台，主营轮胎更换、保养与维修服务。'
-        if 'ONPOINT GROUP' in n or 'MHE INTERMEDIATE' in n:
-            return '物料搬运设备服务商，提供叉车等设备维保、租赁与驻场服务。'
-        if 'LUCIDHEALTH' in n or 'PREMIER IMAGING' in n:
-            return '医学影像服务平台，为医院和门诊提供放射科读片与诊断支持。'
-        if 'HORIZON SERVICES' in n or 'HGH PURCHASER' in n:
-            return '住宅端家庭服务公司，提供暖通、管道及电工安装维修服务。'
-        if 'QUVA PHARMA' in n:
-            return '医院配药与无菌复配服务商，面向医疗机构提供定制制剂。'
-        if 'BLUE OWL CREDIT SLF' in n:
-            return '私募信贷合资放贷平台，面向中型企业提供直接贷款。'
-        if 'MILAN LASER' in n:
-            return '激光脱毛连锁服务商，面向消费者提供标准化医美疗程。'
-        if 'INOVALON' in n:
-            return '医疗数据与健康科技公司，提供医保质量管理与分析软件服务。'
-        if 'PREMISE HEALTH' in n:
-            return '企业医疗与员工健康管理平台，为雇主提供现场诊所运营。'
-        if 'WINDOWS ENTITIES' in n:
-            return '打包SPV主体，底层大概率为门窗相关制造或分销资产。'
-        if 'VERMONT AUS' in n:
-            return '境外控股主体，具体经营口径需结合附注与底层资产进一步确认。'
+        if 'MEDALLIA' in n:
+            return '客户体验管理（CXM）软件平台，为企业提供客户反馈与体验分析SaaS。'
+        if 'ACI GROUP' in n:
+            return '以企业IT与数字化转型为主的技术服务平台，提供咨询与外包交付。'
+        if 'DCA INVESTMENT' in n:
+            return '投资控股主体，底层大概率为专业服务或工业细分资产。'
+        if 'LD LOWER HOLDINGS' in n:
+            return '控股型借款主体，底层业务需结合附注进一步确认。'
+        if 'RED FOX CD' in n:
+            return '控股型并购主体，通常对应特定细分行业资产整合平台。'
+        if 'MODE PURCHASER' in n:
+            return '并购载体公司，底层经营实体需结合披露附注识别。'
+        if 'TRIPLE LIFT' in n:
+            return '广告技术/数字营销相关平台概率较高，面向企业客户提供增长解决方案。'
+        if 'NINTEX' in n:
+            return '低代码流程自动化平台，帮助企业进行工作流与应用开发自动化。'
+        if 'ZEUS, LLC' in n or n.startswith('ZEUS '):
+            return '医疗器械与特种材料领域主体概率较高，具体以附注为准。'
+        if 'SEKO GLOBAL LOGISTICS' in n:
+            return '国际供应链与货代物流服务商，提供跨境运输与仓配管理。'
+        if 'WINDOWS ACQUISITION' in n:
+            return '门窗相关制造/分销资产的并购控股主体。'
+        if 'CAMBIUM LEARNING' in n:
+            return 'K-12 教育科技平台，提供课程内容、评测与教学数字化产品。'
+        if 'GATEKEEPER SYSTEMS' in n:
+            return '零售防损与资产追踪技术服务商，面向商超等场景提供系统方案。'
+        if 'RED RIVER TECHNOLOGY' in n:
+            return '企业IT基础设施集成与采购服务商，覆盖云、网络与安全领域。'
+        if 'ZORRO BIDCO' in n:
+            return '并购SPV主体，底层通常为规模化运营企业。'
+        if 'WHCG PURCHASER' in n:
+            return '医疗健康相关并购主体，底层资产多为医疗服务或技术平台。'
+        if 'FENCING SUPPLY GROUP' in n:
+            return '围栏与周边建材分销平台，服务承包商与工程客户。'
+        if 'AMERILIFE' in n:
+            return '保险分销与金融产品销售平台，聚焦寿险、年金及退休规划。'
+        if 'DISCOVERY EDUCATION' in n:
+            return '教育内容与数字课程平台，为学校提供教学资源与互动工具。'
+        if 'NAVIGATOR ACQUIROR' in n:
+            return '并购控股主体，底层经营资产需结合附注确认。'
         return '企业借款主体或特定项目控股公司。'
 
     out = df.copy()
@@ -131,7 +133,7 @@ def _pick_num(vals, idx):
 
 
 def _detect_colmap(df: pd.DataFrame):
-    """Detect key columns and candidate amount blocks for OBDC SoI tables."""
+    """Detect key columns and candidate amount blocks for BXSL SoI tables."""
     if df.shape[1] < 20:
         return None
 
@@ -146,12 +148,26 @@ def _detect_colmap(df: pd.DataFrame):
     def find_cols(keyword):
         return [i for i, t in enumerate(tops) if keyword in t]
 
-    company_cols = find_cols('company')
-    invest_cols = find_cols('investment')
+    company_cols = find_cols('company') + find_cols('investment') + find_cols('investments')
+    invest_cols = find_cols('investment') + find_cols('investments')
     amort_cols = find_cols('amortized cost')
-    fair_cols = find_cols('fair value')
+    # TSLX variants may label amount as Cost or Principal.
+    cost_cols = [i for i, t in enumerate(tops) if (' cost' in t or t.strip().startswith('cost')) and 'amortized cost' not in t]
+    principal_cols = find_cols('principal')
+    fair_cols = find_cols('fair value') + find_cols('fairvalue')
 
-    if not company_cols or not amort_cols or not fair_cols:
+    amount_cols = amort_cols if amort_cols else (cost_cols if cost_cols else principal_cols)
+
+    if not company_cols or not amount_cols or not fair_cols:
+        # TSLX continuation tables may lose header labels after pagination.
+        # Fallback fixed layout seen in 27-column SoI fragments.
+        if df.shape[1] >= 22:
+            return {
+                'company': 0,
+                'invest': 2 if df.shape[1] > 2 else 0,
+                'amort_cols': [16],
+                'fair_cols': [21],
+            }
         return None
 
     company_col = company_cols[0]
@@ -160,7 +176,7 @@ def _detect_colmap(df: pd.DataFrame):
     return {
         'company': company_col,
         'invest': invest_col,
-        'amort_cols': sorted(set(amort_cols)),
+        'amort_cols': sorted(set(amount_cols)),
         'fair_cols': sorted(set(fair_cols)),
     }
 
@@ -181,18 +197,15 @@ def _infer_table_context_year(tbl):
             soi_dist = i
 
         if year_dist is None:
-            m = re.search(r'december\s+31,\s*(202[45])', low)
+            m = re.search(r'(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2},\s*(202[45])', low)
             if m:
                 year_dist = i
-                year_val = int(m.group(1))
+                year_val = int(m.group(2))
 
         if soi_dist is not None and year_dist is not None:
             break
 
     if soi_dist is None or year_val is None:
-        return None
-    # Keep only tables that are reasonably close to a SoI heading block.
-    if soi_dist > 140:
         return None
     return year_val
 
@@ -201,20 +214,41 @@ def _parse_obdc_year(url: str, target_year: int) -> pd.DataFrame:
     soup = BeautifulSoup(_retry_get_content(url), 'lxml')
 
     all_rows = []
+    carry_company = None  # handle page-break continuation tables with blank company cells
 
-    for tbl in soup.find_all('table'):
-        ctx_year = _infer_table_context_year(tbl)
+    tables = soup.find_all('table')
+
+    # Build candidate list first, then fill year=None by nearest known-year table.
+    candidates = []
+    for idx, tbl in enumerate(tables):
+        txt = tbl.get_text(' ', strip=True).lower()
+        if 'company' not in txt and 'investments' not in txt and 'investment' not in txt and 'loan' not in txt:
+            continue
+        if ('amortized cost' not in txt and ' cost ' not in f' {txt} ' and 'principal' not in txt and ' par ' not in f' {txt} ' and 'loan' not in txt):
+            continue
+        if 'fair value' not in txt and 'fairvalue' not in txt and ' value ' not in f' {txt} ' and 'loan' not in txt:
+            continue
+        candidates.append((idx, tbl, txt, _infer_table_context_year(tbl)))
+
+    # Fill missing years by nearest known-year neighbor within SoI run.
+    known = [(i, y) for i, _, _, y in candidates if y in (2025, 2024)]
+    resolved = []
+    for i, tbl, txt, y in candidates:
+        if y in (2025, 2024):
+            resolved.append((i, tbl, txt, y))
+            continue
+        if not known:
+            continue
+        nearest = min(known, key=lambda p: abs(p[0] - i))
+        if abs(nearest[0] - i) <= 12:
+            y = nearest[1]
+            resolved.append((i, tbl, txt, y))
+
+    for _, tbl, txt, ctx_year in resolved:
         if ctx_year != target_year:
             continue
 
-        txt = tbl.get_text(' ', strip=True).lower()
-        if 'company' not in txt:
-            continue
-        if 'amortized cost' not in txt or 'fair value' not in txt:
-            continue
-        if '% of net assets' not in txt and 'percentage of net assets' not in txt:
-            continue
-
+        # TSLX layouts may omit explicit % of net assets in some split tables.
         try:
             df = pd.read_html(StringIO(str(tbl)))[0]
         except Exception:
@@ -244,7 +278,7 @@ def _parse_obdc_year(url: str, target_year: int) -> pd.DataFrame:
         detail = {}
         subtotal = {}
 
-        current = None
+        current = carry_company
         closed = False
 
         for _, row in df.iterrows():
@@ -311,6 +345,10 @@ def _parse_obdc_year(url: str, target_year: int) -> pd.DataFrame:
             if f > 0:
                 all_rows.append({'CanonKey': _canon_key(name), 'CompanyKey': name, 'Face': f, 'Fair': r, 'IsSubtotal': is_subtotal})
 
+        # Preserve last seen company for continuation tables of the same year section.
+        if current is not None:
+            carry_company = current
+
     if not all_rows:
         return pd.DataFrame(columns=['CanonKey', 'CompanyKey', 'Face', 'Fair'])
 
@@ -329,8 +367,7 @@ def analyze(ticker):
     cik = get_cik(ticker)
     equity_usd = get_shareholder_equity(cik) or 1000000000
 
-    # Use the latest (2026-filed) 10-K only.
-    # This filing contains both 2025 and 2024 SoI sections.
+    # Single-file policy: use latest 10-K and extract both 2025 and 2024 from that filing.
     url_2025 = fetch_latest_10k_url(cik, filing_year=2026)
 
     df25 = _parse_obdc_year(url_2025, 2025).rename(columns={'Face': 'Face_2025', 'Fair': 'Fair_2025', 'CompanyKey': 'CompanyKey_2025'})
@@ -358,11 +395,13 @@ def analyze(ticker):
 
     merged['CompanyKey'] = merged['DisplayName']
 
-    # OBDC SoI values are in $ thousands => convert to $ millions
-    merged['Face_2025_M'] = merged['Face_2025'] / 1000
-    merged['Fair_2025_M'] = merged['Fair_2025'] / 1000
-    merged['Face_2024_M'] = merged['Face_2024'] / 1000
-    merged['Fair_2024_M'] = merged['Fair_2024'] / 1000
+    # Auto-detect unit scale: some filings are already in $ millions, others in $ thousands.
+    # Heuristic: if median face is large, treat as thousands and convert to millions.
+    scale = 1000 if merged['Face_2025'].median() > 2000 else 1
+    merged['Face_2025_M'] = merged['Face_2025'] / scale
+    merged['Fair_2025_M'] = merged['Fair_2025'] / scale
+    merged['Face_2024_M'] = merged['Face_2024'] / scale
+    merged['Fair_2024_M'] = merged['Fair_2024'] / scale
 
     threshold_m = (equity_usd / 1000000) * 0.002
     merged = merged[merged['Face_2025_M'] > threshold_m]

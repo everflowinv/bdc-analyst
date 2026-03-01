@@ -234,14 +234,14 @@ def analyze(ticker):
     merged['Face_2024_M'] = merged['Face_2024'] * table_scale / 1000000
     merged['Fair_2024_M'] = merged['Fair_2024'] * table_scale / 1000000
 
-    threshold_m = (equity_usd / 1000000) * 0.005
+    threshold_m = (equity_usd / 1000000) * 0.002
     merged = merged[merged['Face_2025_M'] > threshold_m]
 
     merged['ratio_2025'] = merged['Fair_2025_M'] / merged['Face_2025_M']
     merged['ratio_2024'] = merged['Fair_2024_M'] / merged['Face_2024_M']
     merged['ratio_drop'] = merged['ratio_2024'] - merged['ratio_2025']
 
-    out = merged[merged['ratio_drop'] > 0].sort_values('ratio_drop', ascending=False).head(20).copy()
+    out = merged[(merged['ratio_drop'] > 0) & (merged['ratio_2025'] <= 1.0)].sort_values('ratio_drop', ascending=False).head(20).copy()
     out = add_simple_business_intro(out)
 
     out['Face_2025_fmt'] = out['Face_2025_M'].map('{:.2f}'.format)
