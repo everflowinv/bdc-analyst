@@ -238,6 +238,7 @@ def analyze(ticker, periodA=None, periodB=None):
 
     merged = pd.merge(df25, df24, on='CompanyKey', how='inner', suffixes=('_2025', '_2024'))
     merged = merged[(merged['Face_2025'] > 0) & (merged['Face_2024'] > 0)]
+    merged = merged[~merged['CompanyKey'].str.contains(r'^(TOTAL|SUBTOTAL|NET)\b|\b(DEBT INVESTMENTS|EQUITY INVESTMENTS|FIRST LIEN|SECOND LIEN|SENIOR SECURED|PREFERRED STOCK|LP INTEREST|REVOLVING LINE OF CREDIT)\b', case=False, regex=True, na=False)]
 
     table_scale = 1000 if (len(df25) and df25['Face'].median() < 1000000) else 1
 

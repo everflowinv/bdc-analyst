@@ -15,6 +15,11 @@ PROFILE_MAP = {
     'CSWC': 'bdc_profiles.cswc',
     'PSEC': 'bdc_profiles.psec',
     'MSDL': 'bdc_profiles.msdl',
+    'OTF': 'bdc_profiles.otf',
+    'TRIN': 'bdc_profiles.trin',
+    'GSBD': 'bdc_profiles.gsbd',
+    'OCSL': 'bdc_profiles.ocsl',
+    'KBDC': 'bdc_profiles.kbdc',
 }
 
 

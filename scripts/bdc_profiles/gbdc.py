@@ -61,6 +61,26 @@ def _display_name_key(name: str) -> str:
     return s
 
 
+def _is_summary_like_name(name: str) -> bool:
+    n = _clean_display_name(name).upper()
+    if not n:
+        return True
+    patterns = [
+        r'^TOTAL\b', r'^SUBTOTAL\b', r'^NET\b',
+        r'\bDEBT INVESTMENTS\b', r'\bEQUITY INVESTMENTS\b',
+        r'\bFIRST LIEN\b', r'\bSECOND LIEN\b',
+        r'\bSENIOR SECURED\b', r'\bPREFERRED STOCK\b',
+        r'\bLP INTEREST\b', r'\bREVOLVING LINE OF CREDIT\b',
+        r'\bASSET BASED\b', r'\bALL ASSETS\b',
+    ]
+    for p in patterns:
+        if re.search(p, n):
+            return True
+    if len(n.split()) <= 3 and any(k in n for k in ['DEBT', 'CREDIT', 'INVESTMENTS', 'STOCK', 'INTEREST', 'SECURED']):
+        return True
+    return False
+
+
 def _enrich_business_intro(df: pd.DataFrame) -> pd.DataFrame:
     """Rule-based business intro enrichment for common BXSL names."""
     def intro(name: str) -> str:
@@ -266,6 +286,10 @@ def _parse_obdc_year(url: str, target_year: int) -> pd.DataFrame:
                 low = company_raw.lower()
                 if any(k in low for k in ['company', 'schedule of investments', 'industry', 'total']):
                     continue
+                if _is_summary_like_name(company_raw):
+                    current = None
+                    closed = False
+                    continue
                 current = _collapse_repeated_name(company_raw)
                 closed = False
 
@@ -314,6 +338,8 @@ def _parse_obdc_year(url: str, target_year: int) -> pd.DataFrame:
             chosen[name] = (f, r, 1)
 
         for name, (f, r, is_subtotal) in chosen.items():
+            if _is_summary_like_name(name):
+                continue
             if f > 0:
                 all_rows.append({'CanonKey': _canon_key(name), 'CompanyKey': name, 'Face': f, 'Fair': r, 'IsSubtotal': is_subtotal})
 

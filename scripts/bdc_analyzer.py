@@ -82,19 +82,24 @@ def _date_to_quarter(date_str: str):
     return (dt.month - 1) // 3 + 1
 
 
-def fetch_filing_url_for_period(cik, period: str):
-    """Return filing URL (10-Q/10-K) whose reportDate matches the target YYQn.
+def fetch_filing_url_for_period(cik, period: str, allow_fallback: bool = True, return_meta: bool = False):
+    """Return filing URL (10-Q/10-K) for target YYQn.
 
-    Preference: exact quarter match by reportDate, latest filingDate first.
+    If exact period is unavailable and allow_fallback=True, falls back to nearest
+    available period by reportDate quarter distance.
+
+    return_meta=True -> (url, resolved_period, used_fallback)
     """
     target_year = period_to_year(period)
     target_q = period_to_quarter(period)
+    target_idx = target_year * 4 + target_q
 
     res = requests.get(f"https://data.sec.gov/submissions/CIK{cik}.json", headers=get_headers(), timeout=60)
     res.raise_for_status()
     filings = res.json()['filings']['recent']
 
-    candidates = []
+    exact = []
+    all_candidates = []
     n = len(filings.get('form', []))
     for i in range(n):
         form = filings['form'][i]
@@ -110,17 +115,32 @@ def fetch_filing_url_for_period(cik, period: str):
         q = _date_to_quarter(report_date)
         if q is None:
             continue
+        filing_date = str(filings.get('filingDate', [''])[i])
+        all_candidates.append((y, q, filing_date, i))
         if y == target_year and q == target_q:
-            candidates.append((str(filings.get('filingDate', [''])[i]), i))
+            exact.append((filing_date, i))
 
-    if not candidates:
-        raise ValueError(f"No 10-Q/10-K filing found for period {period}")
+    used_fallback = False
+    if exact:
+        exact.sort(key=lambda x: x[0], reverse=True)
+        idx = exact[0][1]
+        resolved_y, resolved_q = target_year, target_q
+    else:
+        if not allow_fallback or not all_candidates:
+            raise ValueError(f"No 10-Q/10-K filing found for period {period}")
+        used_fallback = True
+        # nearest quarter; tie-break by latest filing date
+        all_candidates.sort(key=lambda t: (abs((t[0] * 4 + t[1]) - target_idx), -int(t[2].replace('-', '') or '0')))
+        resolved_y, resolved_q, _, idx = all_candidates[0]
 
-    candidates.sort(key=lambda x: x[0], reverse=True)
-    idx = candidates[0][1]
     acc = filings['accessionNumber'][idx].replace('-', '')
     doc = filings['primaryDocument'][idx]
-    return f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{acc}/{doc}"
+    url = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{acc}/{doc}"
+    resolved_period = f"{str(resolved_y)[-2:]}Q{resolved_q}"
+
+    if return_meta:
+        return url, resolved_period, used_fallback
+    return url
 
 
 def clean_num(x):

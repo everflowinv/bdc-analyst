@@ -173,13 +173,23 @@ def _detect_colmap(df: pd.DataFrame):
     company_cols = find_cols('company') + find_cols('investment') + find_cols('investments')
     invest_cols = find_cols('investment') + find_cols('investments')
     amort_cols = find_cols('amortized cost')
-    # BXSL often labels this as plain "Cost"
+    # TSLX variants may label amount as Cost or Principal.
     cost_cols = [i for i, t in enumerate(tops) if (' cost' in t or t.strip().startswith('cost')) and 'amortized cost' not in t]
+    principal_cols = find_cols('principal')
     fair_cols = find_cols('fair value') + find_cols('fairvalue')
 
-    amount_cols = amort_cols if amort_cols else cost_cols
+    amount_cols = amort_cols if amort_cols else (cost_cols if cost_cols else principal_cols)
 
     if not company_cols or not amount_cols or not fair_cols:
+        # TSLX continuation tables may lose header labels after pagination.
+        # Fallback fixed layout seen in 27-column SoI fragments.
+        if df.shape[1] >= 22:
+            return {
+                'company': 0,
+                'invest': 2 if df.shape[1] > 2 else 0,
+                'amort_cols': [16],
+                'fair_cols': [21],
+            }
         return None
 
     company_col = company_cols[0]
@@ -228,19 +238,39 @@ def _parse_obdc_year(url: str, target_year: int) -> pd.DataFrame:
     all_rows = []
     carry_company = None  # handle page-break continuation tables with blank company cells
 
-    for tbl in soup.find_all('table'):
-        ctx_year = _infer_table_context_year(tbl)
+    tables = soup.find_all('table')
+
+    # Build candidate list first, then fill year=None by nearest known-year table.
+    candidates = []
+    for idx, tbl in enumerate(tables):
+        txt = tbl.get_text(' ', strip=True).lower()
+        if 'company' not in txt and 'investments' not in txt and 'investment' not in txt and 'loan' not in txt:
+            continue
+        if ('amortized cost' not in txt and ' cost ' not in f' {txt} ' and 'principal' not in txt and ' par ' not in f' {txt} ' and 'loan' not in txt):
+            continue
+        if 'fair value' not in txt and 'fairvalue' not in txt and ' value ' not in f' {txt} ' and 'loan' not in txt:
+            continue
+        candidates.append((idx, tbl, txt, _infer_table_context_year(tbl)))
+
+    # Fill missing years by nearest known-year neighbor within SoI run.
+    known = [(i, y) for i, _, _, y in candidates if y in (2025, 2024)]
+    resolved = []
+    for i, tbl, txt, y in candidates:
+        if y in (2025, 2024):
+            resolved.append((i, tbl, txt, y))
+            continue
+        if not known:
+            continue
+        nearest = min(known, key=lambda p: abs(p[0] - i))
+        if abs(nearest[0] - i) <= 12:
+            y = nearest[1]
+            resolved.append((i, tbl, txt, y))
+
+    for _, tbl, txt, ctx_year in resolved:
         if ctx_year != target_year:
             continue
 
-        txt = tbl.get_text(' ', strip=True).lower()
-        if 'company' not in txt and 'investments' not in txt and 'investment' not in txt:
-            continue
-        if ('amortized cost' not in txt and ' cost ' not in f' {txt} ') or 'fair value' not in txt:
-            continue
-        # MAIN layouts may omit an explicit "% of net assets" header in some sections.
-        # Company + cost + fair value is sufficient for extraction.
-
+        # TSLX layouts may omit explicit % of net assets in some split tables.
         try:
             df = pd.read_html(StringIO(str(tbl)))[0]
         except Exception:
@@ -352,11 +382,11 @@ def _parse_obdc_year(url: str, target_year: int) -> pd.DataFrame:
 
     out = pd.DataFrame(all_rows)
     out = out[out['CanonKey'].str.len() > 0]
-    # Dedupe repeated analytical tables:
-    # 1) prefer subtotal-derived company rows,
-    # 2) then prefer larger face (more complete row),
-    # 3) then lower fair as stable tie-breaker.
-    out = out.sort_values(['CanonKey', 'IsSubtotal', 'Face', 'Fair'], ascending=[True, False, False, True])
+    # Dedupe repeated analytical tables for TSLX:
+    # prioritize larger face first (more likely true instrument amount),
+    # then lower fair as tie-breaker. Do not force subtotal priority because
+    # continuation tables may surface section subtotal lines under current company.
+    out = out.sort_values(['CanonKey', 'Face', 'Fair', 'IsSubtotal'], ascending=[True, False, True, False])
     out = out.groupby('CanonKey', as_index=False).first()[['CanonKey', 'CompanyKey', 'Face', 'Fair']]
     return out
 
@@ -366,11 +396,16 @@ def analyze(ticker, periodA=None, periodB=None):
     equity_usd = get_shareholder_equity(cik) or 1000000000
 
     # Single-file policy: use latest 10-K and extract both 2025 and 2024 from that filing.
+    fallback_notes = []
     if periodA and periodB:
         year_a = period_to_year(periodA)
         year_b = period_to_year(periodB)
-        url_a = fetch_filing_url_for_period(cik, periodA)
-        url_b = fetch_filing_url_for_period(cik, periodB)
+        url_a, resolved_a, fb_a = fetch_filing_url_for_period(cik, periodA, allow_fallback=True, return_meta=True)
+        url_b, resolved_b, fb_b = fetch_filing_url_for_period(cik, periodB, allow_fallback=True, return_meta=True)
+        if fb_a:
+            fallback_notes.append(f"periodA 请求 {periodA} 不可用，已回退到最近可用期 {resolved_a}")
+        if fb_b:
+            fallback_notes.append(f"periodB 请求 {periodB} 不可用，已回退到最近可用期 {resolved_b}")
     else:
         year_a, year_b = 2025, 2024
         url_a = fetch_latest_10k_url(cik, filing_year=2026)
@@ -383,6 +418,8 @@ def analyze(ticker, periodA=None, periodB=None):
     # so multiple tranches (first/second lien/revolver) under same entity are merged.
     merged = pd.merge(df25, df24, on='CanonKey', how='inner')
     if len(merged) == 0:
+        if fallback_notes:
+            print('\n' + '；'.join(fallback_notes))
         print('\n| 公司名 | 2025年face value（金额百万美元，下同） | 2025年fair value | 2025年face/fair（用百分比表示） | 2024年face | 2024年fair | 2024年face/fair（用百分比表示） | 过去一年face/fair变化 | 公司主要业务的一句话简介 |')
         print('|---|---:|---:|---:|---:|---:|---:|---:|---|')
         return
@@ -436,6 +473,8 @@ def analyze(ticker, periodA=None, periodB=None):
         '2024年face', '2024年fair', '2024年face/fair（用百分比表示）', '过去一年face/fair变化', '公司主要业务的一句话简介'
     ]
 
+    if fallback_notes:
+        print('\n' + '；'.join(fallback_notes))
     print('\n' + tabulate(show, headers='keys', tablefmt='pipe', showindex=False))
 
 

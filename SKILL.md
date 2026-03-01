@@ -60,3 +60,4 @@ Rules:
 - If the name is a PE shell (Bidco/Holdco/Intermediate), infer and describe the likely operating company/business where possible.
 - Output one concise Chinese sentence focusing on products/services and target customers.
 - If confidence is low, clearly use a cautious generic wording.
+- In all final output tables, if the company name contains commas, replace commas with spaces before presenting the table.
