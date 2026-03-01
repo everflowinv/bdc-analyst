@@ -3,6 +3,8 @@ import importlib
 
 PROFILE_MAP = {
     'MFIC': 'bdc_profiles.mfic',
+    'ARCC': 'bdc_profiles.arcc',
+    'OBDC': 'bdc_profiles.obdc',
 }
 
 

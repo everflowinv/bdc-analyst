@@ -216,30 +216,12 @@ def extract_two_year_tables(url):
     return final[2025], final[2024]
 
 def add_simple_business_intro(df):
-    def intro(name):
-        n = name.lower()
-        if 'help hp scf' in n: return '涉及供应链融资或特定资产持有的特殊目的实体'
-        if 'excalibur combineco' in n: return '私募机构旗下的并购控股实体，通常用于持有特定企业资产'
-        if 'pluralsight' in n: return '面向软件开发者和IT专业人士的在线技术学习与技能评估平台'
-        if 'petvet' in n: return '美国大型兽医连锁机构，运营全美数百家全科及专科动物医院'
-        if 'fifth season' in n: return '从事人寿保险保单贴现(Life Settlement)及相关另类资产的投资公司'
-        if 'inovalon' in n: return '为医疗健康行业提供基于云的数据分析与干预平台，优化医疗质量与成本'
-        if 'knockout intermediate' in n: return 'IT管理软件公司 Kaseya 的母公司或关联并购控股实体'
-        if 'acquia' in n: return '基于开源Drupal的数字体验软件平台，提供企业级内容管理和云端服务'
-        if 'simpler postage' in n: return '在线邮政与物流电商软件提供商（如 Stamps.com/Auctane 的运营主体）'
-        if 'blackhawk' in n: return '全球领先的预付卡、礼品卡及品牌支付和奖励解决方案提供商'
-        if 'indikami' in n: return '生命科学商业化数据平台 IntegriChain 的控股实体，提供医药定价分析'
-        if 'peraton' in n: return '为美国政府及国防情报机构提供关键任务IT、网络安全和空间技术的服务商'
-        if 'btrs' in n: return '运营 Billtrust 品牌，提供B2B订单到现金及应收账款自动化的SaaS解决方案'
-        if 'kaseya' in n: return '面向托管服务提供商(MSP)和中小型企业的统一IT管理及网络安全平台'
-        if '6sense' in n: return 'B2B预测性智能与意图数据平台，帮助销售和营销团队精准识别潜在客户'
-        if 'certinia' in n: return '基于Salesforce平台的企业级专业服务自动化(PSA)和ERP软件提供商'
-        if 'cloudpay' in n: return '为跨国企业提供全球薪酬管理和统一员工支付解决方案的云平台'
-        if 'hyland' in n: return '领先的企业内容管理(ECM)和流程自动化软件提供商，核心产品为 OnBase'
-        if 'salinger bidco' in n: return '私募基金控股实体，通常用于杠杆收购(LBO)中的特定项目控股'
-        if 'velocity holdco' in n: return '私募股权机构用于并购技术或企业服务资产的控股公司'
-        return '企业借款主体或特定项目控股公司'
-    df['业务简介'] = df['CompanyKey'].apply(intro)
+    """
+    Baseline intro only (no external API calls).
+    Final enriched intro should be produced by the assistant model in post-processing.
+    """
+    fallback = '企业借款主体或特定项目控股公司'
+    df['业务简介'] = fallback
     return df
 
 def parse_htgc_table(tbl):

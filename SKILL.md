@@ -22,6 +22,12 @@ bash ~/.openclaw/workspace/skills/bdc-analyst/run.sh --ticker [TICKER]
 ```
 For example: `bash ~/.openclaw/workspace/skills/bdc-analyst/run.sh --ticker OTF`
 
+## Mandatory Post-Processing Contract (Direct Output)
+After running the script, the assistant MUST post-process the result and output the final table directly to the user with enriched `公司主要业务的一句话简介`.
+
+This enrichment MUST use the assistant's own model knowledge in the current session (no external LLM API calls).
+If confidence is low for a company, use cautious wording rather than generic filler.
+
 ## ⚠️ AI Output Requirements (CRITICAL)
 
 When presenting the final results to the user, the AI must ensure the output is a **Markdown Table** with the following exact column headers:
@@ -36,7 +42,12 @@ When presenting the final results to the user, the AI must ensure the output is 
 9. **公司主要业务的一句话简介** (One-sentence business description)
 
 ### How to handle "公司主要业务的一句话简介"
-The Python script provides a basic baseline, but **you (the AI) MUST use your internal knowledge to rewrite/enrich this column before outputting the table to the user**.
-- Do not just output generic labels like "企业借款主体" (Corporate Borrower) if you know the company.
-- Many names are PE shell entities (e.g., "Bidco", "Holdco", "Combineco", "Intermediate Holdings"). You must identify the **actual underlying operating company** (e.g., "SIMPLER POSTAGE, INC." -> Stamps.com/Auctane; "KNOCKOUT INTERMEDIATE" -> Kaseya) and describe its core business.
-- Provide a concrete, one-sentence description explaining **what products they provide and who their target customers are** (e.g., "面向托管服务提供商(MSP)和中小型企业的统一IT管理及网络安全平台", "全球领先的预付卡、礼品卡及品牌支付和奖励解决方案提供商").
+The Python script only outputs a baseline placeholder for this column.
+
+**The assistant must enrich this column using its own model knowledge in the final response** (not by calling another external AI API).
+
+Rules:
+- Do not keep generic labels when you can infer the underlying operating business.
+- If the name is a PE shell (Bidco/Holdco/Intermediate), infer and describe the likely operating company/business where possible.
+- Output one concise Chinese sentence focusing on products/services and target customers.
+- If confidence is low, clearly use a cautious generic wording.
