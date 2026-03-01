@@ -10,6 +10,8 @@ from bdc_analyzer import (
     get_cik,
     get_shareholder_equity,
     fetch_latest_10k_url,
+    fetch_filing_url_for_period,
+    period_to_year,
     clean_num,
     normalize_company,
     add_simple_business_intro,
@@ -217,12 +219,22 @@ def extract_two_year_tables_mfic(url):
     return df25, df24
 
 
-def analyze(ticker):
+def analyze(ticker, periodA=None, periodB=None):
     cik = get_cik(ticker)
     equity_usd = get_shareholder_equity(cik) or 1000000000
 
-    url = fetch_latest_10k_url(cik, filing_year=2026)
-    df25, df24 = extract_two_year_tables_mfic(url)
+    if periodA and periodB:
+        url_a = fetch_filing_url_for_period(cik, periodA)
+        url_b = fetch_filing_url_for_period(cik, periodB)
+        ya = period_to_year(periodA)
+        yb = period_to_year(periodB)
+        dfa, _ = extract_two_year_tables_mfic(url_a)
+        dfb, _ = extract_two_year_tables_mfic(url_b)
+        # keep only latest period year rows from each filing
+        df25, df24 = dfa, dfb
+    else:
+        url = fetch_latest_10k_url(cik, filing_year=2026)
+        df25, df24 = extract_two_year_tables_mfic(url)
 
     merged = pd.merge(df25, df24, on='CompanyKey', how='inner', suffixes=('_2025', '_2024'))
     merged = merged[(merged['Face_2025'] > 0) & (merged['Face_2024'] > 0)]

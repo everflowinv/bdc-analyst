@@ -1,6 +1,7 @@
 import os
 import re
 import sys
+from datetime import datetime
 from io import StringIO
 
 import numpy as np
@@ -57,6 +58,69 @@ def fetch_latest_10k_url(cik, filing_year=2026):
             doc = filings['primaryDocument'][i]
             return f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{acc}/{doc}"
     raise ValueError(f"No recent 10-K found")
+
+
+def period_to_year(period: str):
+    m = re.match(r'^(\d{2})Q([1-4])$', str(period).upper())
+    if not m:
+        raise ValueError(f"Invalid period: {period}. Use YYQn, e.g. 25Q4")
+    return 2000 + int(m.group(1))
+
+
+def period_to_quarter(period: str):
+    m = re.match(r'^(\d{2})Q([1-4])$', str(period).upper())
+    if not m:
+        raise ValueError(f"Invalid period: {period}. Use YYQn, e.g. 25Q4")
+    return int(m.group(2))
+
+
+def _date_to_quarter(date_str: str):
+    try:
+        dt = datetime.strptime(date_str, '%Y-%m-%d')
+    except Exception:
+        return None
+    return (dt.month - 1) // 3 + 1
+
+
+def fetch_filing_url_for_period(cik, period: str):
+    """Return filing URL (10-Q/10-K) whose reportDate matches the target YYQn.
+
+    Preference: exact quarter match by reportDate, latest filingDate first.
+    """
+    target_year = period_to_year(period)
+    target_q = period_to_quarter(period)
+
+    res = requests.get(f"https://data.sec.gov/submissions/CIK{cik}.json", headers=get_headers(), timeout=60)
+    res.raise_for_status()
+    filings = res.json()['filings']['recent']
+
+    candidates = []
+    n = len(filings.get('form', []))
+    for i in range(n):
+        form = filings['form'][i]
+        if form not in ('10-Q', '10-K'):
+            continue
+        report_date = str(filings.get('reportDate', [''])[i] or '')
+        if not report_date:
+            continue
+        try:
+            y = int(report_date[:4])
+        except Exception:
+            continue
+        q = _date_to_quarter(report_date)
+        if q is None:
+            continue
+        if y == target_year and q == target_q:
+            candidates.append((str(filings.get('filingDate', [''])[i]), i))
+
+    if not candidates:
+        raise ValueError(f"No 10-Q/10-K filing found for period {period}")
+
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    idx = candidates[0][1]
+    acc = filings['accessionNumber'][idx].replace('-', '')
+    doc = filings['primaryDocument'][idx]
+    return f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{acc}/{doc}"
 
 
 def clean_num(x):

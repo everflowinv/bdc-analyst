@@ -1,5 +1,6 @@
 import argparse
 import importlib
+import inspect
 
 PROFILE_MAP = {
     'MFIC': 'bdc_profiles.mfic',
@@ -20,6 +21,8 @@ PROFILE_MAP = {
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--ticker', required=True)
+    p.add_argument('--periodA', required=False)
+    p.add_argument('--periodB', required=False)
     args, passthrough = p.parse_known_args()
 
     ticker = args.ticker.upper()
@@ -29,7 +32,11 @@ def main():
     if not hasattr(mod, 'analyze'):
         raise RuntimeError(f'Module {module_name} has no analyze(ticker)')
 
-    mod.analyze(ticker)
+    sig = inspect.signature(mod.analyze)
+    if 'periodA' in sig.parameters and 'periodB' in sig.parameters:
+        mod.analyze(ticker, periodA=args.periodA, periodB=args.periodB)
+    else:
+        mod.analyze(ticker)
 
 
 if __name__ == '__main__':

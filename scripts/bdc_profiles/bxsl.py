@@ -12,6 +12,8 @@ from bdc_analyzer import (
     get_cik,
     get_shareholder_equity,
     fetch_latest_10k_url,
+    fetch_filing_url_for_period,
+    period_to_year,
     clean_num,
 )
 
@@ -331,16 +333,22 @@ def _parse_obdc_year(url: str, target_year: int) -> pd.DataFrame:
     return out
 
 
-def analyze(ticker):
+def analyze(ticker, periodA=None, periodB=None):
     cik = get_cik(ticker)
     equity_usd = get_shareholder_equity(cik) or 1000000000
 
-    # Use the latest (2026-filed) 10-K only.
-    # This filing contains both 2025 and 2024 SoI sections.
-    url_2025 = fetch_latest_10k_url(cik, filing_year=2026)
+    if periodA and periodB:
+        year_a = period_to_year(periodA)
+        year_b = period_to_year(periodB)
+        url_a = fetch_filing_url_for_period(cik, periodA)
+        url_b = fetch_filing_url_for_period(cik, periodB)
+    else:
+        year_a, year_b = 2025, 2024
+        url_a = fetch_latest_10k_url(cik, filing_year=2026)
+        url_b = url_a
 
-    df25 = _parse_obdc_year(url_2025, 2025).rename(columns={'Face': 'Face_2025', 'Fair': 'Fair_2025', 'CompanyKey': 'CompanyKey_2025'})
-    df24 = _parse_obdc_year(url_2025, 2024).rename(columns={'Face': 'Face_2024', 'Fair': 'Fair_2024', 'CompanyKey': 'CompanyKey_2024'})
+    df25 = _parse_obdc_year(url_a, year_a).rename(columns={'Face': 'Face_2025', 'Fair': 'Fair_2025', 'CompanyKey': 'CompanyKey_2025'})
+    df24 = _parse_obdc_year(url_b, year_b).rename(columns={'Face': 'Face_2024', 'Fair': 'Fair_2024', 'CompanyKey': 'CompanyKey_2024'})
 
     # First align by canonical key, then aggregate by cleaned display name
     # so multiple tranches (first/second lien/revolver) under same entity are merged.

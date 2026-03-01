@@ -10,6 +10,7 @@ from bdc_analyzer import (
     get_cik,
     get_shareholder_equity,
     fetch_latest_10k_url,
+    fetch_filing_url_for_period,
     clean_num,
     normalize_company,
     add_simple_business_intro,
@@ -143,12 +144,24 @@ def _extract_arcc_company_rows(url):
     return out
 
 
-def analyze(ticker):
+def analyze(ticker, periodA=None, periodB=None):
     cik = get_cik(ticker)
     equity_usd = get_shareholder_equity(cik) or 1000000000
-    url = fetch_latest_10k_url(cik, filing_year=2026)
+    if periodA and periodB:
+        raw_a = _extract_arcc_company_rows(fetch_filing_url_for_period(cik, periodA))
+        raw_b = _extract_arcc_company_rows(fetch_filing_url_for_period(cik, periodB))
+        if len(raw_a) == 0 or len(raw_b) == 0:
+            raw = pd.DataFrame()
+        else:
+            ya = int(raw_a['year'].max())
+            yb = int(raw_b['year'].max())
+            a = raw_a[raw_a['year'] == ya].copy(); a['year'] = 2025
+            b = raw_b[raw_b['year'] == yb].copy(); b['year'] = 2024
+            raw = pd.concat([a, b], ignore_index=True)
+    else:
+        url = fetch_latest_10k_url(cik, filing_year=2026)
+        raw = _extract_arcc_company_rows(url)
 
-    raw = _extract_arcc_company_rows(url)
     if len(raw) == 0:
         print('\n| 公司名 | 2025年face value（金额百万美元，下同） | 2025年fair value | 2025年face/fair（用百分比表示） | 2024年face | 2024年fair | 2024年face/fair（用百分比表示） | 过去一年face/fair变化 | 公司主要业务的一句话简介 |')
         print('|---|---:|---:|---:|---:|---:|---:|---:|---|')

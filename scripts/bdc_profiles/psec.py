@@ -12,6 +12,8 @@ from bdc_analyzer import (
     get_cik,
     get_shareholder_equity,
     fetch_latest_10k_url,
+    fetch_filing_url_for_period,
+    period_to_year,
     clean_num,
 )
 
@@ -57,6 +59,26 @@ def _display_name_key(name: str) -> str:
     s = re.sub(r'[^A-Z0-9 ]', ' ', s)
     s = re.sub(r'\s+', ' ', s).strip()
     return s
+
+
+def _is_summary_like_name(name: str) -> bool:
+    n = _clean_display_name(name).upper()
+    if not n:
+        return True
+    patterns = [
+        r'^TOTAL\b', r'^SUBTOTAL\b', r'^NET\b',
+        r'\bDEBT INVESTMENTS\b', r'\bEQUITY INVESTMENTS\b',
+        r'\bFIRST LIEN DEBT\b', r'\bSECOND LIEN DEBT\b',
+        r'\bREVOLVING LINE OF CREDIT\b', r'\bSTRUCTURED CREDIT\b',
+        r'\bASSET BASED\b', r'\bALL ASSETS\b',
+    ]
+    for p in patterns:
+        if re.search(p, n):
+            return True
+    # very short bucket labels (e.g., "FIRST LIEN DEBT") should be excluded
+    if len(n.split()) <= 3 and any(k in n for k in ['DEBT', 'CREDIT', 'INVESTMENTS']):
+        return True
+    return False
 
 
 def _enrich_business_intro(df: pd.DataFrame) -> pd.DataFrame:
@@ -265,6 +287,10 @@ def _parse_obdc_year(url: str, target_year: int) -> pd.DataFrame:
                 low = company_raw.lower()
                 if any(k in low for k in ['company', 'schedule of investments', 'industry', 'total']):
                     continue
+                if _is_summary_like_name(company_raw):
+                    current = None
+                    closed = False
+                    continue
                 current = _collapse_repeated_name(company_raw)
                 closed = False
 
@@ -313,6 +339,8 @@ def _parse_obdc_year(url: str, target_year: int) -> pd.DataFrame:
             chosen[name] = (f, r, 1)
 
         for name, (f, r, is_subtotal) in chosen.items():
+            if _is_summary_like_name(name):
+                continue
             if f > 0:
                 all_rows.append({'CanonKey': _canon_key(name), 'CompanyKey': name, 'Face': f, 'Fair': r, 'IsSubtotal': is_subtotal})
 
@@ -330,15 +358,23 @@ def _parse_obdc_year(url: str, target_year: int) -> pd.DataFrame:
     return out
 
 
-def analyze(ticker):
+def analyze(ticker, periodA=None, periodB=None):
     cik = get_cik(ticker)
     equity_usd = get_shareholder_equity(cik) or 1000000000
 
     # Single-file policy: use latest 10-K and extract both 2025 and 2024 from that filing.
-    url_2025 = fetch_latest_10k_url(cik, filing_year=2026)
+    if periodA and periodB:
+        year_a = period_to_year(periodA)
+        year_b = period_to_year(periodB)
+        url_a = fetch_filing_url_for_period(cik, periodA)
+        url_b = fetch_filing_url_for_period(cik, periodB)
+    else:
+        year_a, year_b = 2025, 2024
+        url_a = fetch_latest_10k_url(cik, filing_year=2026)
+        url_b = url_a
 
-    df25 = _parse_obdc_year(url_2025, 2025).rename(columns={'Face': 'Face_2025', 'Fair': 'Fair_2025', 'CompanyKey': 'CompanyKey_2025'})
-    df24 = _parse_obdc_year(url_2025, 2024).rename(columns={'Face': 'Face_2024', 'Fair': 'Fair_2024', 'CompanyKey': 'CompanyKey_2024'})
+    df25 = _parse_obdc_year(url_a, year_a).rename(columns={'Face': 'Face_2025', 'Fair': 'Fair_2025', 'CompanyKey': 'CompanyKey_2025'})
+    df24 = _parse_obdc_year(url_b, year_b).rename(columns={'Face': 'Face_2024', 'Fair': 'Fair_2024', 'CompanyKey': 'CompanyKey_2024'})
 
     # First align by canonical key, then aggregate by cleaned display name
     # so multiple tranches (first/second lien/revolver) under same entity are merged.

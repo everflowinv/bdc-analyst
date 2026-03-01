@@ -5,15 +5,16 @@ description: SEC Financial Data Analyst specialized in parsing BDC (Business Dev
 
 # BDC Analyst Skill
 
-This skill allows the agent to download and parse the raw SEC HTML 10-K filings of Business Development Companies (BDCs) to extract their Schedule of Investments. 
+This skill allows the agent to download and parse raw SEC HTML filings (10-K/10-Q) of Business Development Companies (BDCs) to extract their Schedule of Investments. 
 
 ## When to use
 Use when a user asks to see which loans or assets inside a BDC's portfolio (like FSK, ARCC, MAIN, OBDC, OTF) have deteriorated the most year-over-year based on Fair Value to Face Value (or Amortized Cost) ratios.
 
 ## Core Logic & Filtering
+- **Two-Period Filing Resolution**: For requested periods (`periodA`, `periodB`), automatically resolves each period to the corresponding SEC filing (10-K or 10-Q).
 - **Significant Assets Only**: Automatically fetches the BDC's Shareholder Equity and filters out any loans where the Face Value is less than **0.2%** of the total Shareholder Equity to remove long-tail noise.
 - **Clean Aggregation**: Excludes summary rows (e.g., "Total Asset Based Finance", "Net Asset Based Finance", Subtotals) and aggregates loan tranches by base company.
-- **Deterioration Ranking**: Sorts the portfolio descending by the largest drop in the `Fair Value / Face Value` ratio from 2024 to 2025. Extracts the **top 20 worst deteriorating assets** (where the ratio drop > 0), and excludes names with `2025 Fair/Face > 100%` from the final ranking list.
+- **Deterioration Ranking**: Sorts the portfolio descending by the largest drop in the `Fair Value / Face Value` ratio from periodB to periodA. Extracts the **top 20 worst deteriorating assets** (where the ratio drop > 0), and excludes names with `periodA Fair/Face > 100%` from the final ranking list.
 
 ## Usage
 Use the bash command:
@@ -21,6 +22,14 @@ Use the bash command:
 bash ~/.openclaw/workspace/skills/bdc-analyst/run.sh --ticker [TICKER]
 ```
 For example: `bash ~/.openclaw/workspace/skills/bdc-analyst/run.sh --ticker OTF`
+
+To compare specific periods (recommended):
+```bash
+bash ~/.openclaw/workspace/skills/bdc-analyst/run.sh --ticker [TICKER] --periodA 25Q4 --periodB 24Q4
+```
+- `periodA` / `periodB` format: `YYQn` (e.g., `25Q4`, `25Q3`, `24Q2`).
+- The skill auto-selects the filing containing each target period (10-K or 10-Q, depending on issuer timing).
+- From each selected filing, extraction uses the latest period block in that filing for the target year/quarter context.
 
 ## Mandatory Post-Processing Contract (Direct Output)
 After running the script, the assistant MUST post-process the result and output the final table directly to the user with enriched `公司主要业务的一句话简介`.
