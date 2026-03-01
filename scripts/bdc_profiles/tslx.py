@@ -354,11 +354,11 @@ def _parse_obdc_year(url: str, target_year: int) -> pd.DataFrame:
 
     out = pd.DataFrame(all_rows)
     out = out[out['CanonKey'].str.len() > 0]
-    # Dedupe repeated analytical tables:
-    # 1) prefer subtotal-derived company rows,
-    # 2) then prefer larger face (more complete row),
-    # 3) then lower fair as stable tie-breaker.
-    out = out.sort_values(['CanonKey', 'IsSubtotal', 'Face', 'Fair'], ascending=[True, False, False, True])
+    # Dedupe repeated analytical tables for TSLX:
+    # prioritize larger face first (more likely true instrument amount),
+    # then lower fair as tie-breaker. Do not force subtotal priority because
+    # continuation tables may surface section subtotal lines under current company.
+    out = out.sort_values(['CanonKey', 'Face', 'Fair', 'IsSubtotal'], ascending=[True, False, True, False])
     out = out.groupby('CanonKey', as_index=False).first()[['CanonKey', 'CompanyKey', 'Face', 'Fair']]
     return out
 
