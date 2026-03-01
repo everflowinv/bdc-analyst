@@ -11,7 +11,7 @@ set -e
 SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="$SKILL_DIR/venv"
 REQ_FILE="$SKILL_DIR/requirements.txt"
-SCRIPT_FILE="$SKILL_DIR/scripts/bdc_analyzer.py"
+SCRIPT_FILE="$SKILL_DIR/scripts/run_bdc.py"
 
 get_best_python() {
     for prefix in "/opt/homebrew/bin" "/usr/local/bin" "/usr/bin" "$HOME/.local/bin"; do
