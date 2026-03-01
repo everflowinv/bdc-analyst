@@ -11,6 +11,9 @@ PROFILE_MAP = {
     'FSK': 'bdc_profiles.fsk',
     'HTGC': 'bdc_profiles.htgc',
     'TSLX': 'bdc_profiles.tslx',
+    'CSWC': 'bdc_profiles.cswc',
+    'PSEC': 'bdc_profiles.psec',
+    'MSDL': 'bdc_profiles.msdl',
 }
 
 
