@@ -170,7 +170,7 @@ def analyze(ticker, periodA=None, periodB=None):
     merged['ratio_B'] = merged['Fair_B_M'] / merged['Face_B_M']
     merged['ratio_drop'] = merged['ratio_B'] - merged['ratio_A']
 
-    out = merged[(merged['ratio_drop'] > 0) & (merged['ratio_A'] <= 1.0)].sort_values('ratio_drop', ascending=False).head(20).copy()
+    out = merged[(merged['ratio_drop'] > 0) & (merged['ratio_A'] <= 1.0) & (merged['ratio_B'] <= 1.2)].sort_values('ratio_drop', ascending=False).head(20).copy()
     out['CompanyKey'] = out['Company_A']
     out = add_simple_business_intro(out)
 

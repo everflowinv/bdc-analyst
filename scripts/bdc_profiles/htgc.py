@@ -381,7 +381,7 @@ def analyze(ticker, periodA=None, periodB=None):
     merged['ratio_2024'] = merged['Fair_2024_M'] / merged['Face_2024_M']
     merged['ratio_drop'] = merged['ratio_2024'] - merged['ratio_2025']
 
-    out = merged[(merged['ratio_drop'] > 0) & (merged['ratio_2025'] <= 1.0)].sort_values('ratio_drop', ascending=False).head(20).copy()
+    out = merged[(merged['ratio_drop'] > 0) & (merged['ratio_2025'] <= 1.0) & (merged['ratio_2024'] <= 1.2)].sort_values('ratio_drop', ascending=False).head(20).copy()
     out = _enrich_business_intro(out)
 
     out['Face_2025_fmt'] = out['Face_2025_M'].map('{:.2f}'.format)

@@ -14,6 +14,7 @@ from bdc_analyzer import (
     fetch_latest_10k_url,
     fetch_filing_url_for_period,
     period_to_year,
+    period_to_quarter,
     clean_num,
 )
 
@@ -180,14 +181,36 @@ def _infer_table_context_year(tbl):
     return year_val
 
 
-def _parse_obdc_year(url: str, target_year: int) -> pd.DataFrame:
+def _period_label(target_year: int, target_quarter: int):
+    md = {1: 'march 31', 2: 'june 30', 3: 'september 30', 4: 'december 31'}.get(target_quarter)
+    if not md:
+        return None
+    return f"{md}, {target_year}"
+
+
+def _table_matches_period(tbl, target_year: int, target_quarter: int | None):
+    if target_quarter is None:
+        return True
+    label = _period_label(target_year, target_quarter)
+    if not label:
+        return True
+    for s in tbl.find_all_previous(string=True, limit=260):
+        t = ' '.join(str(s).split()).lower()
+        if label in t:
+            return True
+    return False
+
+
+def _parse_obdc_year(url: str, target_year: int, target_quarter: int | None = None) -> pd.DataFrame:
     soup = BeautifulSoup(_retry_get_content(url), 'lxml')
 
     all_rows = []
 
-    for tbl in soup.find_all('table'):
+    for tbl_idx, tbl in enumerate(soup.find_all('table')):
         ctx_year = _infer_table_context_year(tbl)
         if ctx_year != target_year:
+            continue
+        if not _table_matches_period(tbl, target_year, target_quarter):
             continue
 
         txt = tbl.get_text(' ', strip=True).lower()
@@ -298,7 +321,7 @@ def _parse_obdc_year(url: str, target_year: int) -> pd.DataFrame:
             if _is_summary_like_name(name):
                 continue
             if f > 0:
-                all_rows.append({'CanonKey': _canon_key(name), 'CompanyKey': name, 'Face': f, 'Fair': r, 'IsSubtotal': is_subtotal})
+                all_rows.append({'CanonKey': _canon_key(name), 'CompanyKey': name, 'Face': f, 'Fair': r, 'IsSubtotal': is_subtotal, 'TableIdx': tbl_idx})
 
     if not all_rows:
         return pd.DataFrame(columns=['CanonKey', 'CompanyKey', 'Face', 'Fair'])
@@ -309,7 +332,7 @@ def _parse_obdc_year(url: str, target_year: int) -> pd.DataFrame:
     # 1) prefer subtotal-derived company rows,
     # 2) then prefer larger face (more complete row),
     # 3) then lower fair as stable tie-breaker.
-    out = out.sort_values(['CanonKey', 'IsSubtotal', 'Face', 'Fair'], ascending=[True, False, False, True])
+    out = out.sort_values(['CanonKey', 'TableIdx', 'IsSubtotal', 'Face'], ascending=[True, True, False, False])
     out = out.groupby('CanonKey', as_index=False).first()[['CanonKey', 'CompanyKey', 'Face', 'Fair']]
     return out
 
@@ -322,6 +345,8 @@ def analyze(ticker, periodA=None, periodB=None):
     if periodA and periodB:
         year_a = period_to_year(periodA)
         year_b = period_to_year(periodB)
+        q_a = period_to_quarter(periodA)
+        q_b = period_to_quarter(periodB)
         url_a, resolved_a, fb_a = fetch_filing_url_for_period(cik, periodA, allow_fallback=True, return_meta=True)
         url_b, resolved_b, fb_b = fetch_filing_url_for_period(cik, periodB, allow_fallback=True, return_meta=True)
         if fb_a:
@@ -330,14 +355,15 @@ def analyze(ticker, periodA=None, periodB=None):
             fallback_notes.append(f"periodB 请求 {periodB} 不可用，已回退到最近可用期 {resolved_b}")
     else:
         year_a, year_b = 2025, 2024
+        q_a, q_b = None, None
         url_a = fetch_latest_10k_url(cik, filing_year=2026)
         url_b = url_a
 
     dispA = periodA if periodA else '2025'
     dispB = periodB if periodB else '2024'
 
-    df25 = _parse_obdc_year(url_a, year_a).rename(columns={'Face': 'Face_2025', 'Fair': 'Fair_2025', 'CompanyKey': 'CompanyKey_2025'})
-    df24 = _parse_obdc_year(url_b, year_b).rename(columns={'Face': 'Face_2024', 'Fair': 'Fair_2024', 'CompanyKey': 'CompanyKey_2024'})
+    df25 = _parse_obdc_year(url_a, year_a, q_a).rename(columns={'Face': 'Face_2025', 'Fair': 'Fair_2025', 'CompanyKey': 'CompanyKey_2025'})
+    df24 = _parse_obdc_year(url_b, year_b, q_b).rename(columns={'Face': 'Face_2024', 'Fair': 'Fair_2024', 'CompanyKey': 'CompanyKey_2024'})
 
     # First align by canonical key, then aggregate by cleaned display name
     # so multiple tranches (first/second lien/revolver) under same entity are merged.
@@ -381,7 +407,7 @@ def analyze(ticker, periodA=None, periodB=None):
     merged['ratio_2024'] = merged['Fair_2024_M'] / merged['Face_2024_M']
     merged['ratio_drop'] = merged['ratio_2024'] - merged['ratio_2025']
 
-    out = merged[(merged['ratio_drop'] > 0) & (merged['ratio_2025'] <= 1.0)].sort_values('ratio_drop', ascending=False).head(20).copy()
+    out = merged[(merged['ratio_drop'] > 0) & (merged['ratio_2025'] <= 1.0) & (merged['ratio_2024'] <= 1.2)].sort_values('ratio_drop', ascending=False).head(20).copy()
     out = _enrich_business_intro(out)
 
     out['Face_2025_fmt'] = out['Face_2025_M'].map('{:.2f}'.format)
