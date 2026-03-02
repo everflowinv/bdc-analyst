@@ -20,6 +20,11 @@ PROFILE_MAP = {
     'GSBD': 'bdc_profiles.gsbd',
     'OCSL': 'bdc_profiles.ocsl',
     'KBDC': 'bdc_profiles.kbdc',
+    'BBDC': 'bdc_profiles.bbdc',
+    'BCSF': 'bdc_profiles.bcsf',
+    'PFLT': 'bdc_profiles.pflt',
+    'SLRC': 'bdc_profiles.slrc',
+    'CGBD': 'bdc_profiles.cgbd',
 }
 
 

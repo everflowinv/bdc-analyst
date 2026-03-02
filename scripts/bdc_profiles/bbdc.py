@@ -109,8 +109,8 @@ def _pick_num(vals, idx):
 
 
 def _detect_colmap(df: pd.DataFrame):
-    """Detect key columns and candidate amount blocks for GSBD/TSLX-like SoI tables."""
-    if df.shape[1] < 12:
+    """Detect key columns and candidate amount blocks for BBDC/TSLX-like SoI tables."""
+    if df.shape[1] < 10:
         return None
 
     tops = []
@@ -285,11 +285,17 @@ def _parse_obdc_year(url: str, target_year: int) -> pd.DataFrame:
             face = None
             fair = None
             for c in amort_candidates:
-                face = _pick_num(vals, c)
+                for cc in (c, c + 1, c + 2, c + 3):
+                    face = _pick_num(vals, cc)
+                    if face is not None:
+                        break
                 if face is not None:
                     break
             for c in fair_candidates:
-                fair = _pick_num(vals, c)
+                for cc in (c, c + 1, c + 2, c + 3):
+                    fair = _pick_num(vals, cc)
+                    if fair is not None:
+                        break
                 if fair is not None:
                     break
             if face is None and fair is None:
@@ -342,8 +348,8 @@ def _parse_obdc_year(url: str, target_year: int) -> pd.DataFrame:
     # prioritize larger face first (more likely true instrument amount),
     # then lower fair as tie-breaker. Do not force subtotal priority because
     # continuation tables may surface section subtotal lines under current company.
-    out = out.sort_values(['CanonKey', 'Face', 'Fair', 'IsSubtotal'], ascending=[True, False, True, False])
-    out = out.groupby('CanonKey', as_index=False).first()[['CanonKey', 'CompanyKey', 'Face', 'Fair']]
+    out = out.drop_duplicates(subset=['CanonKey', 'Face', 'Fair'])
+    out = out.groupby('CanonKey', as_index=False).agg({'CompanyKey': 'first', 'Face': 'sum', 'Fair': 'sum'})
     return out
 
 

@@ -109,8 +109,8 @@ def _pick_num(vals, idx):
 
 
 def _detect_colmap(df: pd.DataFrame):
-    """Detect key columns and candidate amount blocks for GSBD/TSLX-like SoI tables."""
-    if df.shape[1] < 12:
+    """Detect key columns and candidate amount blocks for SLRC/TSLX-like SoI tables."""
+    if df.shape[1] < 10:
         return None
 
     tops = []
@@ -127,22 +127,33 @@ def _detect_colmap(df: pd.DataFrame):
     company_cols = find_cols('company') + find_cols('investment') + find_cols('investments')
     invest_cols = find_cols('investment') + find_cols('investments')
     amort_cols = find_cols('amortized cost')
-    # TSLX variants may label amount as Cost or Principal.
+    # Prefer explicit Cost columns and avoid Par/Shares/Principal columns for face.
     cost_cols = [i for i, t in enumerate(tops) if (' cost' in t or t.strip().startswith('cost')) and 'amortized cost' not in t]
     principal_cols = find_cols('principal')
     fair_cols = find_cols('fair value') + find_cols('fairvalue')
+
+    amort_cols = [i for i in amort_cols if 'cost' in tops[i] and 'par' not in tops[i] and 'shares' not in tops[i] and 'principal' not in tops[i]]
+    cost_cols = [i for i in cost_cols if 'par' not in tops[i] and 'shares' not in tops[i] and 'principal' not in tops[i]]
+    fair_cols = [i for i in fair_cols if 'fair' in tops[i] and 'cost' not in tops[i]]
 
     amount_cols = amort_cols if amort_cols else (cost_cols if cost_cols else principal_cols)
 
     if not company_cols or not amount_cols or not fair_cols:
         # TSLX continuation tables may lose header labels after pagination.
         # Fallback fixed layout seen in 27-column SoI fragments.
+        if df.shape[1] >= 26:
+            return {
+                'company': 0,
+                'invest': 2 if df.shape[1] > 2 else 0,
+                'amort_cols': [20],
+                'fair_cols': [24],
+            }
         if df.shape[1] >= 22:
             return {
                 'company': 0,
                 'invest': 2 if df.shape[1] > 2 else 0,
-                'amort_cols': [16],
-                'fair_cols': [21],
+                'amort_cols': [15],
+                'fair_cols': [19],
             }
         return None
 
@@ -285,11 +296,18 @@ def _parse_obdc_year(url: str, target_year: int) -> pd.DataFrame:
             face = None
             fair = None
             for c in amort_candidates:
-                face = _pick_num(vals, c)
+                # face should prefer cost-like column; avoid drifting into par/shares columns
+                for cc in (c, c + 1):
+                    face = _pick_num(vals, cc)
+                    if face is not None:
+                        break
                 if face is not None:
                     break
             for c in fair_candidates:
-                fair = _pick_num(vals, c)
+                for cc in (c, c + 1, c + 2, c + 3):
+                    fair = _pick_num(vals, cc)
+                    if fair is not None:
+                        break
                 if fair is not None:
                     break
             if face is None and fair is None:
@@ -342,8 +360,8 @@ def _parse_obdc_year(url: str, target_year: int) -> pd.DataFrame:
     # prioritize larger face first (more likely true instrument amount),
     # then lower fair as tie-breaker. Do not force subtotal priority because
     # continuation tables may surface section subtotal lines under current company.
-    out = out.sort_values(['CanonKey', 'Face', 'Fair', 'IsSubtotal'], ascending=[True, False, True, False])
-    out = out.groupby('CanonKey', as_index=False).first()[['CanonKey', 'CompanyKey', 'Face', 'Fair']]
+    out = out.drop_duplicates(subset=['CanonKey', 'Face', 'Fair'])
+    out = out.groupby('CanonKey', as_index=False).agg({'CompanyKey': 'first', 'Face': 'sum', 'Fair': 'sum'})
     return out
 
 

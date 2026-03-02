@@ -14,6 +14,7 @@ from bdc_analyzer import (
     fetch_latest_10k_url,
     fetch_filing_url_for_period,
     period_to_year,
+    period_to_quarter,
     clean_num,
 )
 
@@ -109,8 +110,8 @@ def _pick_num(vals, idx):
 
 
 def _detect_colmap(df: pd.DataFrame):
-    """Detect key columns and candidate amount blocks for GSBD/TSLX-like SoI tables."""
-    if df.shape[1] < 12:
+    """Detect key columns and candidate amount blocks for PFLT/TSLX-like SoI tables."""
+    if df.shape[1] < 10:
         return None
 
     tops = []
@@ -127,22 +128,34 @@ def _detect_colmap(df: pd.DataFrame):
     company_cols = find_cols('company') + find_cols('investment') + find_cols('investments')
     invest_cols = find_cols('investment') + find_cols('investments')
     amort_cols = find_cols('amortized cost')
-    # TSLX variants may label amount as Cost or Principal.
+    # Prefer explicit Cost columns and avoid Par/Shares/Principal columns for face.
     cost_cols = [i for i, t in enumerate(tops) if (' cost' in t or t.strip().startswith('cost')) and 'amortized cost' not in t]
     principal_cols = find_cols('principal')
     fair_cols = find_cols('fair value') + find_cols('fairvalue')
+
+    # sanitize contaminated matches from collapsed multi-row headers
+    amort_cols = [i for i in amort_cols if 'cost' in tops[i] and 'par' not in tops[i] and 'shares' not in tops[i] and 'principal' not in tops[i]]
+    cost_cols = [i for i in cost_cols if 'par' not in tops[i] and 'shares' not in tops[i] and 'principal' not in tops[i]]
+    fair_cols = [i for i in fair_cols if 'fair' in tops[i] and 'cost' not in tops[i]]
 
     amount_cols = amort_cols if amort_cols else (cost_cols if cost_cols else principal_cols)
 
     if not company_cols or not amount_cols or not fair_cols:
         # TSLX continuation tables may lose header labels after pagination.
         # Fallback fixed layout seen in 27-column SoI fragments.
+        if df.shape[1] >= 26:
+            return {
+                'company': 0,
+                'invest': 2 if df.shape[1] > 2 else 0,
+                'amort_cols': [20],
+                'fair_cols': [24],
+            }
         if df.shape[1] >= 22:
             return {
                 'company': 0,
                 'invest': 2 if df.shape[1] > 2 else 0,
-                'amort_cols': [16],
-                'fair_cols': [21],
+                'amort_cols': [15],
+                'fair_cols': [19],
             }
         return None
 
@@ -186,7 +199,28 @@ def _infer_table_context_year(tbl):
     return year_val
 
 
-def _parse_obdc_year(url: str, target_year: int) -> pd.DataFrame:
+def _period_label(target_year: int, target_quarter: int):
+    md = {1: 'march 31', 2: 'june 30', 3: 'september 30', 4: 'december 31'}.get(target_quarter)
+    if not md:
+        return None
+    return f"{md}, {target_year}"
+
+
+def _table_matches_period(tbl, target_year: int, target_quarter: int | None):
+    if target_quarter is None:
+        return True
+    label = _period_label(target_year, target_quarter)
+    if not label:
+        return True
+    # Date label usually appears in nearby heading text, not always inside table.
+    for s in tbl.find_all_previous(string=True, limit=250):
+        t = ' '.join(str(s).split()).lower()
+        if label in t:
+            return True
+    return False
+
+
+def _parse_obdc_year(url: str, target_year: int, target_quarter: int | None = None) -> pd.DataFrame:
     soup = BeautifulSoup(_retry_get_content(url), 'lxml')
 
     all_rows = []
@@ -206,7 +240,9 @@ def _parse_obdc_year(url: str, target_year: int) -> pd.DataFrame:
             continue
         candidates.append((idx, tbl, txt, _infer_table_context_year(tbl)))
 
-    # Fill missing years by nearest known-year neighbor within SoI run.
+    # Fill missing years by nearby known-year context.
+    # Prefer previous known-year table (continuation pages usually follow heading section),
+    # then fallback to next known-year table.
     known = [(i, y) for i, _, _, y in candidates if y is not None]
     resolved = []
     for i, tbl, txt, y in candidates:
@@ -215,14 +251,26 @@ def _parse_obdc_year(url: str, target_year: int) -> pd.DataFrame:
             continue
         if not known:
             continue
-        nearest = min(known, key=lambda p: abs(p[0] - i))
-        if abs(nearest[0] - i) <= 12:
-            y = nearest[1]
+        prev = [k for k in known if k[0] <= i]
+        nxt = [k for k in known if k[0] > i]
+        picked = None
+        if prev:
+            picked = prev[-1]
+            if i - picked[0] > 20:
+                picked = None
+        if picked is None and nxt:
+            picked = nxt[0]
+            if picked[0] - i > 12:
+                picked = None
+        if picked is not None:
+            y = picked[1]
             resolved.append((i, tbl, txt, y))
 
-    for _, tbl, txt, ctx_year in resolved:
+    for tbl_idx, tbl, txt, ctx_year in resolved:
         if ctx_year != target_year:
             continue
+        # Do not hard-filter by heading date label; some filings split comparable blocks
+        # into continuation tables with sparse/indirect date headers.
 
         # TSLX layouts may omit explicit % of net assets in some split tables.
         try:
@@ -285,11 +333,17 @@ def _parse_obdc_year(url: str, target_year: int) -> pd.DataFrame:
             face = None
             fair = None
             for c in amort_candidates:
-                face = _pick_num(vals, c)
+                for cc in (c, c + 1, c + 2, c + 3):
+                    face = _pick_num(vals, cc)
+                    if face is not None:
+                        break
                 if face is not None:
                     break
             for c in fair_candidates:
-                fair = _pick_num(vals, c)
+                for cc in (c, c + 1, c + 2, c + 3):
+                    fair = _pick_num(vals, cc)
+                    if fair is not None:
+                        break
                 if fair is not None:
                     break
             if face is None and fair is None:
@@ -327,7 +381,7 @@ def _parse_obdc_year(url: str, target_year: int) -> pd.DataFrame:
             if _is_summary_like_name(name):
                 continue
             if f > 0:
-                all_rows.append({'CanonKey': _canon_key(name), 'CompanyKey': name, 'Face': f, 'Fair': r, 'IsSubtotal': is_subtotal})
+                all_rows.append({'CanonKey': _canon_key(name), 'CompanyKey': name, 'Face': f, 'Fair': r, 'IsSubtotal': is_subtotal, 'TableIdx': tbl_idx})
 
         # Preserve last seen company for continuation tables of the same year section.
         if current is not None:
@@ -342,7 +396,10 @@ def _parse_obdc_year(url: str, target_year: int) -> pd.DataFrame:
     # prioritize larger face first (more likely true instrument amount),
     # then lower fair as tie-breaker. Do not force subtotal priority because
     # continuation tables may surface section subtotal lines under current company.
-    out = out.sort_values(['CanonKey', 'Face', 'Fair', 'IsSubtotal'], ascending=[True, False, True, False])
+    out = out.drop_duplicates(subset=['CanonKey', 'Face', 'Fair'])
+    # Prefer earliest table block for each issuer to avoid duplicate schedule sections
+    # from subsidiary/alternative presentations in the same filing.
+    out = out.sort_values(['CanonKey', 'TableIdx', 'Face'], ascending=[True, True, False])
     out = out.groupby('CanonKey', as_index=False).first()[['CanonKey', 'CompanyKey', 'Face', 'Fair']]
     return out
 
@@ -351,29 +408,31 @@ def analyze(ticker, periodA=None, periodB=None):
     cik = get_cik(ticker)
     equity_usd = get_shareholder_equity(cik) or 1000000000
 
-    # Single-file policy: use latest 10-K and extract both 2025 and 2024 from that filing.
     fallback_notes = []
     if periodA and periodB:
         year_a = period_to_year(periodA)
         year_b = period_to_year(periodB)
+        q_a = period_to_quarter(periodA)
+        q_b = period_to_quarter(periodB)
         url_a, resolved_a, fb_a = fetch_filing_url_for_period(cik, periodA, allow_fallback=True, return_meta=True)
         url_b, resolved_b, fb_b = fetch_filing_url_for_period(cik, periodB, allow_fallback=True, return_meta=True)
         if fb_a:
             fallback_notes.append(f"periodA 请求 {periodA} 不可用，已回退到最近可用期 {resolved_a}")
         if fb_b:
             fallback_notes.append(f"periodB 请求 {periodB} 不可用，已回退到最近可用期 {resolved_b}")
+        dispA, dispB = periodA, periodB
     else:
+        # Dynamic default: latest annual filing + its comparable prior year block.
         url_a = fetch_latest_10k_url(cik)
         url_b = url_a
         m = re.search(r'(20\d{2})', url_a)
         year_a = int(m.group(1)) if m else 2025
         year_b = year_a - 1
+        q_a, q_b = None, None
+        dispA, dispB = str(year_a), str(year_b)
 
-    dispA = periodA if periodA else str(year_a)
-    dispB = periodB if periodB else str(year_b)
-
-    df_a = _parse_obdc_year(url_a, year_a).rename(columns={'Face': 'Face_A', 'Fair': 'Fair_A', 'CompanyKey': 'CompanyKey_A'})
-    df_b = _parse_obdc_year(url_b, year_b).rename(columns={'Face': 'Face_B', 'Fair': 'Fair_B', 'CompanyKey': 'CompanyKey_B'})
+    df_a = _parse_obdc_year(url_a, year_a, q_a).rename(columns={'Face': 'Face_A', 'Fair': 'Fair_A', 'CompanyKey': 'CompanyKey_A'})
+    df_b = _parse_obdc_year(url_b, year_b, q_b).rename(columns={'Face': 'Face_B', 'Fair': 'Fair_B', 'CompanyKey': 'CompanyKey_B'})
 
     # First align by canonical key, then aggregate by cleaned display name
     # so multiple tranches (first/second lien/revolver) under same entity are merged.

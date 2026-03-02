@@ -166,7 +166,7 @@ def analyze(ticker, periodA=None, periodB=None):
             b = raw_b[raw_b['year'] == yb].copy(); b['year'] = 2024
             raw = pd.concat([a, b], ignore_index=True)
     else:
-        url = fetch_latest_10k_url(cik, filing_year=2026)
+        url = fetch_latest_10k_url(cik)
         raw = _extract_arcc_company_rows(url)
 
     dispA = periodA if periodA else '2025'
@@ -175,7 +175,7 @@ def analyze(ticker, periodA=None, periodB=None):
     if len(raw) == 0:
         if fallback_notes:
             print('\n' + '；'.join(fallback_notes))
-        print('\n| 公司名 | 2025年face value（金额百万美元，下同） | 2025年fair value | 2025年face/fair（用百分比表示） | 2024年face | 2024年fair | 2024年face/fair（用百分比表示） | 过去一年face/fair变化 | 公司主要业务的一句话简介 |')
+        print('\n| 公司名 | periodA face value（金额百万美元，下同） | periodA fair value | periodA face/fair（用百分比表示） | periodB face | periodB fair | periodB face/fair（用百分比表示） | 过去一年face/fair变化 | 公司主要业务的一句话简介 |')
         print('|---|---:|---:|---:|---:|---:|---:|---:|---|')
         return
 

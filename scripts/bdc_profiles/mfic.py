@@ -238,7 +238,7 @@ def analyze(ticker, periodA=None, periodB=None):
         # each filing uses its latest period block as periodA/periodB snapshot
         df25, df24 = dfa, dfb
     else:
-        url = fetch_latest_10k_url(cik, filing_year=2026)
+        url = fetch_latest_10k_url(cik)
         df25, df24 = extract_two_year_tables_mfic(url)
 
     dispA = periodA if periodA else '2025'

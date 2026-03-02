@@ -109,8 +109,8 @@ def _pick_num(vals, idx):
 
 
 def _detect_colmap(df: pd.DataFrame):
-    """Detect key columns and candidate amount blocks for GSBD/TSLX-like SoI tables."""
-    if df.shape[1] < 12:
+    """Detect key columns and candidate amount blocks for BCSF/TSLX-like SoI tables."""
+    if df.shape[1] < 10:
         return None
 
     tops = []
@@ -206,7 +206,9 @@ def _parse_obdc_year(url: str, target_year: int) -> pd.DataFrame:
             continue
         candidates.append((idx, tbl, txt, _infer_table_context_year(tbl)))
 
-    # Fill missing years by nearest known-year neighbor within SoI run.
+    # Fill missing years by nearby known-year context.
+    # Prefer previous known-year table (continuation pages usually follow the heading section),
+    # then fallback to next known-year table.
     known = [(i, y) for i, _, _, y in candidates if y is not None]
     resolved = []
     for i, tbl, txt, y in candidates:
@@ -215,9 +217,19 @@ def _parse_obdc_year(url: str, target_year: int) -> pd.DataFrame:
             continue
         if not known:
             continue
-        nearest = min(known, key=lambda p: abs(p[0] - i))
-        if abs(nearest[0] - i) <= 12:
-            y = nearest[1]
+        prev = [k for k in known if k[0] <= i]
+        nxt = [k for k in known if k[0] > i]
+        picked = None
+        if prev:
+            picked = prev[-1]
+            if i - picked[0] > 20:
+                picked = None
+        if picked is None and nxt:
+            picked = nxt[0]
+            if picked[0] - i > 12:
+                picked = None
+        if picked is not None:
+            y = picked[1]
             resolved.append((i, tbl, txt, y))
 
     for _, tbl, txt, ctx_year in resolved:
@@ -285,11 +297,19 @@ def _parse_obdc_year(url: str, target_year: int) -> pd.DataFrame:
             face = None
             fair = None
             for c in amort_candidates:
-                face = _pick_num(vals, c)
+                # some filings place "$" and value in adjacent columns; probe nearby cells
+                for cc in (c, c + 1, c + 2, c + 3):
+                    face = _pick_num(vals, cc)
+                    if face is not None:
+                        break
                 if face is not None:
                     break
             for c in fair_candidates:
-                fair = _pick_num(vals, c)
+                # some filings place "$" and value in adjacent columns; probe nearby cells
+                for cc in (c, c + 1, c + 2, c + 3):
+                    fair = _pick_num(vals, cc)
+                    if fair is not None:
+                        break
                 if fair is not None:
                     break
             if face is None and fair is None:
@@ -338,12 +358,11 @@ def _parse_obdc_year(url: str, target_year: int) -> pd.DataFrame:
 
     out = pd.DataFrame(all_rows)
     out = out[out['CanonKey'].str.len() > 0]
-    # Dedupe repeated analytical tables for TSLX:
-    # prioritize larger face first (more likely true instrument amount),
-    # then lower fair as tie-breaker. Do not force subtotal priority because
-    # continuation tables may surface section subtotal lines under current company.
-    out = out.sort_values(['CanonKey', 'Face', 'Fair', 'IsSubtotal'], ascending=[True, False, True, False])
-    out = out.groupby('CanonKey', as_index=False).first()[['CanonKey', 'CompanyKey', 'Face', 'Fair']]
+    # For BCSF continuation tables, accumulate unique instrument rows per issuer.
+    # 1) remove exact duplicate fragments,
+    # 2) sum remaining rows by canonical issuer key.
+    out = out.drop_duplicates(subset=['CanonKey', 'Face', 'Fair'])
+    out = out.groupby('CanonKey', as_index=False).agg({'CompanyKey': 'first', 'Face': 'sum', 'Fair': 'sum'})
     return out
 
 
