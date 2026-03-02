@@ -162,16 +162,17 @@ def _collect_group_candidates(soup):
 
 
 def _split_candidates_to_year_maps(candidates):
-    """Split subtotal candidates into 2025/2024 maps using descending face heuristic.
+    """Split subtotal candidates into current/prior maps using table-order heuristic.
 
-    In MFIC 2025 filing, the current-year subtotal is typically the larger face amount,
-    while prior-year subtotal is the next candidate for the same group.
+    MFIC may show multiple subtotal-like candidates for the same group where "largest face"
+    is not always the target period value. We therefore prefer earlier table blocks first,
+    and only use face as a tie-breaker within the same table index.
     """
     subs25, mem25 = {}, {}
     subs24, mem24 = {}, {}
 
     for g, rows in candidates.items():
-        rows = sorted(rows, key=lambda x: x['face'], reverse=True)
+        rows = sorted(rows, key=lambda x: (x.get('idx', 10**9), -x.get('face', 0.0)))
         if not rows:
             continue
 
@@ -279,7 +280,7 @@ def analyze(ticker, periodA=None, periodB=None):
     ]]
     show.columns = [
         '公司名', f'{dispA} face value（金额百万美元，下同）', f'{dispA} fair value', f'{dispA} face/fair（用百分比表示）',
-        f'{dispB} face', f'{dispB} fair', f'{dispB} face/fair（用百分比表示）', '过去一年face/fair变化', '公司主要业务的一句话简介'
+        f'{dispB} face', f'{dispB} fair', f'{dispB} face/fair（用百分比表示）', '期间face/fair变化', '公司主要业务的一句话简介'
     ]
 
     if fallback_notes:

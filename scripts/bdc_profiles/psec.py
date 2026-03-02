@@ -343,7 +343,7 @@ def analyze(ticker, periodA=None, periodB=None):
     # so multiple tranches (first/second lien/revolver) under same entity are merged.
     merged = pd.merge(df25, df24, on='CanonKey', how='inner')
     if len(merged) == 0:
-        print('\n| 公司名 | 2025年face value（金额百万美元，下同） | 2025年fair value | 2025年face/fair（用百分比表示） | 2024年face | 2024年fair | 2024年face/fair（用百分比表示） | 过去一年face/fair变化 | 公司主要业务的一句话简介 |')
+        print('\n| 公司名 | 2025年face value（金额百万美元，下同） | 2025年fair value | 2025年face/fair（用百分比表示） | 2024年face | 2024年fair | 2024年face/fair（用百分比表示） | 期间face/fair变化 | 公司主要业务的一句话简介 |')
         print('|---|---:|---:|---:|---:|---:|---:|---:|---|')
         return
 
@@ -393,7 +393,7 @@ def analyze(ticker, periodA=None, periodB=None):
     ]]
     show.columns = [
         '公司名', f'{dispA} face value（金额百万美元，下同）', f'{dispA} fair value', f'{dispA} face/fair（用百分比表示）',
-        f'{dispB} face', f'{dispB} fair', f'{dispB} face/fair（用百分比表示）', '过去一年face/fair变化', '公司主要业务的一句话简介'
+        f'{dispB} face', f'{dispB} fair', f'{dispB} face/fair（用百分比表示）', '期间face/fair变化', '公司主要业务的一句话简介'
     ]
 
     if fallback_notes:
