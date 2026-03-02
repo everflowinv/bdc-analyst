@@ -209,10 +209,10 @@ def _infer_table_context_year(tbl):
             soi_dist = i
 
         if year_dist is None:
-            m = re.search(r'december\s+31,\s*(202[45])', low)
+            m = re.search(r'(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2},\s*(202[45])', low)
             if m:
                 year_dist = i
-                year_val = int(m.group(1))
+                year_val = int(m.group(2))
 
         if soi_dist is not None and year_dist is not None:
             break
@@ -363,11 +363,16 @@ def analyze(ticker, periodA=None, periodB=None):
     cik = get_cik(ticker)
     equity_usd = get_shareholder_equity(cik) or 1000000000
 
+    fallback_notes = []
     if periodA and periodB:
         year_a = period_to_year(periodA)
         year_b = period_to_year(periodB)
-        url_a = fetch_filing_url_for_period(cik, periodA)
-        url_b = fetch_filing_url_for_period(cik, periodB)
+        url_a, resolved_a, fb_a = fetch_filing_url_for_period(cik, periodA, allow_fallback=True, return_meta=True)
+        url_b, resolved_b, fb_b = fetch_filing_url_for_period(cik, periodB, allow_fallback=True, return_meta=True)
+        if fb_a:
+            fallback_notes.append(f"periodA 请求 {periodA} 不可用，已回退到最近可用期 {resolved_a}")
+        if fb_b:
+            fallback_notes.append(f"periodB 请求 {periodB} 不可用，已回退到最近可用期 {resolved_b}")
     else:
         year_a, year_b = 2025, 2024
         url_a = fetch_latest_10k_url(cik, filing_year=2026)
@@ -383,7 +388,14 @@ def analyze(ticker, periodA=None, periodB=None):
     # so multiple tranches (first/second lien/revolver) under same entity are merged.
     merged = pd.merge(df25, df24, on='CanonKey', how='inner')
     if len(merged) == 0:
-        print('\n| 公司名 | 2025年face value（金额百万美元，下同） | 2025年fair value | 2025年face/fair（用百分比表示） | 2024年face | 2024年fair | 2024年face/fair（用百分比表示） | 过去一年face/fair变化 | 公司主要业务的一句话简介 |')
+        a = df25.copy(); b = df24.copy()
+        a['DisplayKey'] = a['CompanyKey_2025'].apply(_display_name_key)
+        b['DisplayKey'] = b['CompanyKey_2024'].apply(_display_name_key)
+        merged = pd.merge(a, b, on='DisplayKey', how='inner')
+    if len(merged) == 0:
+        if fallback_notes:
+            print('\n' + '；'.join(fallback_notes))
+        print('\n| 公司名 | periodA face value（金额百万美元，下同） | periodA fair value | periodA face/fair（用百分比表示） | periodB face | periodB fair | periodB face/fair（用百分比表示） | 过去一年face/fair变化 | 公司主要业务的一句话简介 |')
         print('|---|---:|---:|---:|---:|---:|---:|---:|---|')
         return
 

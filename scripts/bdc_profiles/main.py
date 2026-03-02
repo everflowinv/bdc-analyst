@@ -209,10 +209,10 @@ def _infer_table_context_year(tbl):
             soi_dist = i
 
         if year_dist is None:
-            m = re.search(r'december\s+31,\s*(202[45])', low)
+            m = re.search(r'(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2},\s*(202[45])', low)
             if m:
                 year_dist = i
-                year_val = int(m.group(1))
+                year_val = int(m.group(2))
 
         if soi_dist is not None and year_dist is not None:
             break
@@ -391,7 +391,14 @@ def analyze(ticker, periodA=None, periodB=None):
     # so multiple tranches (first/second lien/revolver) under same entity are merged.
     merged = pd.merge(df25, df24, on='CanonKey', how='inner')
     if len(merged) == 0:
-        print('\n| 公司名 | 2025年face value（金额百万美元，下同） | 2025年fair value | 2025年face/fair（用百分比表示） | 2024年face | 2024年fair | 2024年face/fair（用百分比表示） | 过去一年face/fair变化 | 公司主要业务的一句话简介 |')
+        a = df25.copy(); b = df24.copy()
+        a['DisplayKey'] = a['CompanyKey_2025'].apply(_display_name_key)
+        b['DisplayKey'] = b['CompanyKey_2024'].apply(_display_name_key)
+        merged = pd.merge(a, b, on='DisplayKey', how='inner')
+    if len(merged) == 0:
+        if fallback_notes:
+            print('\n' + '；'.join(fallback_notes))
+        print('\n| 公司名 | periodA face value（金额百万美元，下同） | periodA fair value | periodA face/fair（用百分比表示） | periodB face | periodB fair | periodB face/fair（用百分比表示） | 过去一年face/fair变化 | 公司主要业务的一句话简介 |')
         print('|---|---:|---:|---:|---:|---:|---:|---:|---|')
         return
 

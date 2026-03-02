@@ -56,6 +56,8 @@ def _clean_display_name(name: str) -> str:
 
 def _display_name_key(name: str) -> str:
     s = _clean_display_name(name).upper()
+    # normalize instrument suffixes to merge same issuer across equity classes
+    s = re.sub(r',?\s+(PREFERRED\s+EQUITY|PREFERRED\s+STOCK|COMMON\s+EQUITY|COMMON\s+STOCK)\s*$', '', s)
     s = re.sub(r'[^A-Z0-9 ]', ' ', s)
     s = re.sub(r'\s+', ' ', s).strip()
     return s

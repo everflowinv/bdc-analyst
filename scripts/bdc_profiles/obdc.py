@@ -203,10 +203,10 @@ def _infer_table_context_year(tbl):
             soi_dist = i
 
         if year_dist is None:
-            m = re.search(r'december\s+31,\s*(202[45])', low)
+            m = re.search(r'(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2},\s*(202[45])', low)
             if m:
                 year_dist = i
-                year_val = int(m.group(1))
+                year_val = int(m.group(2))
 
         if soi_dist is not None and year_dist is not None:
             break
@@ -357,11 +357,16 @@ def analyze(ticker, periodA=None, periodB=None):
     cik = get_cik(ticker)
     equity_usd = get_shareholder_equity(cik) or 1000000000
 
+    fallback_notes = []
     if periodA and periodB:
         year_a = period_to_year(periodA)
         year_b = period_to_year(periodB)
-        url_a = fetch_filing_url_for_period(cik, periodA)
-        url_b = fetch_filing_url_for_period(cik, periodB)
+        url_a, resolved_a, fb_a = fetch_filing_url_for_period(cik, periodA, allow_fallback=True, return_meta=True)
+        url_b, resolved_b, fb_b = fetch_filing_url_for_period(cik, periodB, allow_fallback=True, return_meta=True)
+        if fb_a:
+            fallback_notes.append(f"periodA 请求 {periodA} 不可用，已回退到最近可用期 {resolved_a}")
+        if fb_b:
+            fallback_notes.append(f"periodB 请求 {periodB} 不可用，已回退到最近可用期 {resolved_b}")
     else:
         year_a, year_b = 2025, 2024
         url_a = fetch_latest_10k_url(cik, filing_year=2026)
