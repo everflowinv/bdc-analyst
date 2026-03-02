@@ -109,8 +109,8 @@ def _pick_num(vals, idx):
 
 
 def _detect_colmap(df: pd.DataFrame):
-    """Detect key columns and candidate amount blocks for BXSL SoI tables."""
-    if df.shape[1] < 20:
+    """Detect key columns and candidate amount blocks for TSLX SoI tables."""
+    if df.shape[1] < 9:
         return None
 
     tops = []
@@ -136,13 +136,21 @@ def _detect_colmap(df: pd.DataFrame):
 
     if not company_cols or not amount_cols or not fair_cols:
         # TSLX continuation tables may lose header labels after pagination.
-        # Fallback fixed layout seen in 27-column SoI fragments.
+        # Wider 27-col layout.
         if df.shape[1] >= 22:
             return {
                 'company': 0,
                 'invest': 2 if df.shape[1] > 2 else 0,
                 'amort_cols': [16],
                 'fair_cols': [21],
+            }
+        # Common 17-col layout in 10-Q SoI pages.
+        if df.shape[1] >= 17:
+            return {
+                'company': 0,
+                'invest': 2,
+                'amort_cols': [11],
+                'fair_cols': [14],
             }
         return None
 
@@ -173,15 +181,24 @@ def _infer_table_context_year(tbl):
             soi_dist = i
 
         if year_dist is None:
+            # e.g. "June 30, 2024" or "December 31, 2023"
             m = re.search(r'(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2},\s*(20\d{2})', low)
             if m:
                 year_dist = i
                 year_val = int(m.group(2))
+            else:
+                # e.g. comparative header: "June 30, December 31, 2024 2023"
+                m2 = re.search(r'june\s+30\s*,\s*december\s+31\s*,\s*(20\d{2})\s*(20\d{2})', low)
+                if m2:
+                    year_dist = i
+                    year_val = int(m2.group(1))
 
         if soi_dist is not None and year_dist is not None:
             break
 
-    if soi_dist is None or year_val is None:
+    # Some filings split heading text across nodes ("Schedule of Inve"),
+    # so require year presence but do not require exact SoI phrase hit.
+    if year_val is None:
         return None
     return year_val
 
@@ -339,10 +356,9 @@ def _parse_obdc_year(url: str, target_year: int) -> pd.DataFrame:
     out = pd.DataFrame(all_rows)
     out = out[out['CanonKey'].str.len() > 0]
     # Dedupe repeated analytical tables for TSLX:
-    # prioritize larger face first (more likely true instrument amount),
-    # then lower fair as tie-breaker. Do not force subtotal priority because
-    # continuation tables may surface section subtotal lines under current company.
-    out = out.sort_values(['CanonKey', 'Face', 'Fair', 'IsSubtotal'], ascending=[True, False, True, False])
+    # prefer rows with non-zero fair first, then larger face/fair.
+    out['FairPos'] = (out['Fair'] > 0).astype(int)
+    out = out.sort_values(['CanonKey', 'FairPos', 'Face', 'Fair', 'IsSubtotal'], ascending=[True, False, False, False, False])
     out = out.groupby('CanonKey', as_index=False).first()[['CanonKey', 'CompanyKey', 'Face', 'Fair']]
     return out
 
@@ -397,13 +413,13 @@ def analyze(ticker, periodA=None, periodB=None):
 
     merged['CompanyKey'] = merged['DisplayName']
 
-    # Auto-detect unit scale: some filings are already in $ millions, others in $ thousands.
-    # Heuristic: if median face is large, treat as thousands and convert to millions.
-    scale = 1000 if merged['Face_A'].median() > 2000 else 1
-    merged['Face_A_M'] = merged['Face_A'] / scale
-    merged['Fair_A_M'] = merged['Fair_A'] / scale
-    merged['Face_B_M'] = merged['Face_B'] / scale
-    merged['Fair_B_M'] = merged['Fair_B'] / scale
+    # Auto-detect unit scale per period: one filing may be in millions while the other is in thousands.
+    scale_a = 1000 if merged['Face_A'].median() > 2000 else 1
+    scale_b = 1000 if merged['Face_B'].median() > 2000 else 1
+    merged['Face_A_M'] = merged['Face_A'] / scale_a
+    merged['Fair_A_M'] = merged['Fair_A'] / scale_a
+    merged['Face_B_M'] = merged['Face_B'] / scale_b
+    merged['Fair_B_M'] = merged['Fair_B'] / scale_b
 
     threshold_m = (equity_usd / 1000000) * 0.002
     merged = merged[merged['Face_A_M'] > threshold_m]
@@ -412,7 +428,7 @@ def analyze(ticker, periodA=None, periodB=None):
     merged['ratio_B'] = merged['Fair_B_M'] / merged['Face_B_M']
     merged['ratio_drop'] = merged['ratio_B'] - merged['ratio_A']
 
-    out = merged[(merged['ratio_drop'] > 0) & (merged['ratio_A'] <= 1.0)].sort_values('ratio_drop', ascending=False).head(20).copy()
+    out = merged[(merged['ratio_drop'] > 0) & (merged['ratio_A'] <= 1.0) & (merged['ratio_B'] <= 1.2)].sort_values('ratio_drop', ascending=False).head(20).copy()
     out = _enrich_business_intro(out)
 
     out['Face_A_fmt'] = out['Face_A_M'].map('{:.2f}'.format)

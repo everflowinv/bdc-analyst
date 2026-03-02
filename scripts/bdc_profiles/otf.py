@@ -76,6 +76,14 @@ def _is_summary_like_name(name: str) -> bool:
     for p in patterns:
         if re.search(p, n):
             return True
+
+    # Industry/category titles (e.g. "INTERNET & DIRECT MARKETING RETAIL")
+    has_entity_suffix = any(sfx in n for sfx in [
+        ' LLC', ' INC', ' CORP', ' CORPORATION', ' LTD', ' LIMITED', ' PLC', ' LP', ' L.P', ' CO ', ' COMPANY'
+    ])
+    if (not has_entity_suffix) and ('&' in n) and len(n.split()) <= 8:
+        return True
+
     if len(n.split()) <= 3 and any(k in n for k in ['DEBT', 'CREDIT', 'INVESTMENTS', 'STOCK', 'INTEREST', 'SECURED']):
         return True
     return False
@@ -190,7 +198,6 @@ def _parse_obdc_year(url: str, target_year: int) -> pd.DataFrame:
     soup = BeautifulSoup(_retry_get_content(url), 'lxml')
 
     all_rows = []
-    carry_company = None  # handle page-break continuation tables with blank company cells
 
     tables = soup.find_all('table')
 
@@ -256,7 +263,7 @@ def _parse_obdc_year(url: str, target_year: int) -> pd.DataFrame:
         detail = {}
         subtotal = {}
 
-        current = carry_company
+        current = None
         closed = False
 
         for _, row in df.iterrows():
@@ -314,24 +321,19 @@ def _parse_obdc_year(url: str, target_year: int) -> pd.DataFrame:
             a, b = detail.get(current, (0.0, 0.0))
             detail[current] = (a + f, b + r)
 
-        # Prefer explicit subtotal rows (blank company/investment line) when present,
-        # because detail lines can be partial tranches while subtotal reflects the
-        # intended company-level amount for that table block.
+        # Prefer detail rows; use subtotal only when detail is missing.
         chosen = {}
         for name, (f, r) in detail.items():
             chosen[name] = (f, r, 0)
         for name, (f, r) in subtotal.items():
-            chosen[name] = (f, r, 1)
+            if name not in chosen:
+                chosen[name] = (f, r, 1)
 
         for name, (f, r, is_subtotal) in chosen.items():
             if _is_summary_like_name(name):
                 continue
             if f > 0:
                 all_rows.append({'CanonKey': _canon_key(name), 'CompanyKey': name, 'Face': f, 'Fair': r, 'IsSubtotal': is_subtotal})
-
-        # Preserve last seen company for continuation tables of the same year section.
-        if current is not None:
-            carry_company = current
 
     if not all_rows:
         return pd.DataFrame(columns=['CanonKey', 'CompanyKey', 'Face', 'Fair'])
@@ -412,7 +414,7 @@ def analyze(ticker, periodA=None, periodB=None):
     merged['ratio_B'] = merged['Fair_B_M'] / merged['Face_B_M']
     merged['ratio_drop'] = merged['ratio_B'] - merged['ratio_A']
 
-    out = merged[(merged['ratio_drop'] > 0) & (merged['ratio_A'] <= 1.0)].sort_values('ratio_drop', ascending=False).head(20).copy()
+    out = merged[(merged['ratio_drop'] > 0) & (merged['ratio_A'] <= 1.0) & (merged['ratio_B'] <= 1.2)].sort_values('ratio_drop', ascending=False).head(20).copy()
     out = _enrich_business_intro(out)
 
     out['Face_A_fmt'] = out['Face_A_M'].map('{:.2f}'.format)
