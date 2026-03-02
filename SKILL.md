@@ -28,8 +28,9 @@ To compare specific periods (recommended):
 bash ~/.openclaw/workspace/skills/bdc-analyst/run.sh --ticker [TICKER] --periodA 25Q4 --periodB 24Q4
 ```
 - `periodA` / `periodB` format: `YYQn` (e.g., `25Q4`, `25Q3`, `24Q2`).
-- The skill auto-selects the filing containing each target period (10-K or 10-Q, depending on issuer timing).
+- For each target period, the skill auto-selects the **latest filing that covers that period** (10-Q or 10-K, whichever is the latest valid source for that period).
 - From each selected filing, extraction uses the latest period block in that filing for the target year/quarter context.
+- If a requested period does not exist, it automatically falls back to the nearest available period for that side (periodA/periodB), and prints a fallback note above the final table.
 
 ## Mandatory Post-Processing Contract (Direct Output)
 After running the script, the assistant MUST post-process the result and output the final table directly to the user with enriched `公司主要业务的一句话简介`.

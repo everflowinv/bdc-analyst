@@ -367,14 +367,23 @@ def analyze(ticker, periodA=None, periodB=None):
         url_a = fetch_latest_10k_url(cik, filing_year=2026)
         url_b = url_a
 
+    dispA = periodA if periodA else '2025'
+    dispB = periodB if periodB else '2024'
+
     df25 = _parse_obdc_year(url_a, year_a).rename(columns={'Face': 'Face_2025', 'Fair': 'Fair_2025', 'CompanyKey': 'CompanyKey_2025'})
     df24 = _parse_obdc_year(url_b, year_b).rename(columns={'Face': 'Face_2024', 'Fair': 'Fair_2024', 'CompanyKey': 'CompanyKey_2024'})
 
-    # First align by canonical key, then aggregate by cleaned display name
-    # so multiple tranches (first/second lien/revolver) under same entity are merged.
+    # First align by canonical key, then fallback to cleaned display key alignment.
     merged = pd.merge(df25, df24, on='CanonKey', how='inner')
     if len(merged) == 0:
-        print('\n| 公司名 | 2025年face value（金额百万美元，下同） | 2025年fair value | 2025年face/fair（用百分比表示） | 2024年face | 2024年fair | 2024年face/fair（用百分比表示） | 过去一年face/fair变化 | 公司主要业务的一句话简介 |')
+        a = df25.copy(); b = df24.copy()
+        a['DisplayKey'] = a['CompanyKey_2025'].apply(_display_name_key)
+        b['DisplayKey'] = b['CompanyKey_2024'].apply(_display_name_key)
+        merged = pd.merge(a, b, on='DisplayKey', how='inner')
+    if len(merged) == 0:
+        if fallback_notes:
+            print('\n' + '；'.join(fallback_notes))
+        print('\n| 公司名 | periodA face value（金额百万美元，下同） | periodA fair value | periodA face/fair（用百分比表示） | periodB face | periodB fair | periodB face/fair（用百分比表示） | 过去一年face/fair变化 | 公司主要业务的一句话简介 |')
         print('|---|---:|---:|---:|---:|---:|---:|---:|---|')
         return
 
@@ -421,10 +430,12 @@ def analyze(ticker, periodA=None, periodB=None):
         'Face_2024_fmt', 'Fair_2024_fmt', 'ratio_2024_fmt', 'ratio_change_fmt', '业务简介'
     ]]
     show.columns = [
-        '公司名', '2025年face value（金额百万美元，下同）', '2025年fair value', '2025年face/fair（用百分比表示）',
-        '2024年face', '2024年fair', '2024年face/fair（用百分比表示）', '过去一年face/fair变化', '公司主要业务的一句话简介'
+        '公司名', f'{dispA} face value（金额百万美元，下同）', f'{dispA} fair value', f'{dispA} face/fair（用百分比表示）',
+        f'{dispB} face', f'{dispB} fair', f'{dispB} face/fair（用百分比表示）', '过去一年face/fair变化', '公司主要业务的一句话简介'
     ]
 
+    if fallback_notes:
+        print('\n' + '；'.join(fallback_notes))
     print('\n' + tabulate(show, headers='keys', tablefmt='pipe', showindex=False))
 
 

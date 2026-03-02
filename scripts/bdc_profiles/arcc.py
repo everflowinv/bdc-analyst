@@ -147,9 +147,16 @@ def _extract_arcc_company_rows(url):
 def analyze(ticker, periodA=None, periodB=None):
     cik = get_cik(ticker)
     equity_usd = get_shareholder_equity(cik) or 1000000000
+    fallback_notes = []
     if periodA and periodB:
-        raw_a = _extract_arcc_company_rows(fetch_filing_url_for_period(cik, periodA))
-        raw_b = _extract_arcc_company_rows(fetch_filing_url_for_period(cik, periodB))
+        url_a, resolved_a, fb_a = fetch_filing_url_for_period(cik, periodA, allow_fallback=True, return_meta=True)
+        url_b, resolved_b, fb_b = fetch_filing_url_for_period(cik, periodB, allow_fallback=True, return_meta=True)
+        if fb_a:
+            fallback_notes.append(f"periodA 请求 {periodA} 不可用，已回退到最近可用期 {resolved_a}")
+        if fb_b:
+            fallback_notes.append(f"periodB 请求 {periodB} 不可用，已回退到最近可用期 {resolved_b}")
+        raw_a = _extract_arcc_company_rows(url_a)
+        raw_b = _extract_arcc_company_rows(url_b)
         if len(raw_a) == 0 or len(raw_b) == 0:
             raw = pd.DataFrame()
         else:
@@ -162,7 +169,12 @@ def analyze(ticker, periodA=None, periodB=None):
         url = fetch_latest_10k_url(cik, filing_year=2026)
         raw = _extract_arcc_company_rows(url)
 
+    dispA = periodA if periodA else '2025'
+    dispB = periodB if periodB else '2024'
+
     if len(raw) == 0:
+        if fallback_notes:
+            print('\n' + '；'.join(fallback_notes))
         print('\n| 公司名 | 2025年face value（金额百万美元，下同） | 2025年fair value | 2025年face/fair（用百分比表示） | 2024年face | 2024年fair | 2024年face/fair（用百分比表示） | 过去一年face/fair变化 | 公司主要业务的一句话简介 |')
         print('|---|---:|---:|---:|---:|---:|---:|---:|---|')
         return
@@ -202,10 +214,12 @@ def analyze(ticker, periodA=None, periodB=None):
         'Face_2024_fmt', 'Fair_2024_fmt', 'ratio_2024_fmt', 'ratio_change_fmt', '业务简介'
     ]]
     show.columns = [
-        '公司名', '2025年face value（金额百万美元，下同）', '2025年fair value', '2025年face/fair（用百分比表示）',
-        '2024年face', '2024年fair', '2024年face/fair（用百分比表示）', '过去一年face/fair变化', '公司主要业务的一句话简介'
+        '公司名', f'{dispA} face value（金额百万美元，下同）', f'{dispA} fair value', f'{dispA} face/fair（用百分比表示）',
+        f'{dispB} face', f'{dispB} fair', f'{dispB} face/fair（用百分比表示）', '过去一年face/fair变化', '公司主要业务的一句话简介'
     ]
 
+    if fallback_notes:
+        print('\n' + '；'.join(fallback_notes))
     print('\n' + tabulate(show, headers='keys', tablefmt='pipe', showindex=False))
 
 

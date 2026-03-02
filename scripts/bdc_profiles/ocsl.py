@@ -14,6 +14,7 @@ from bdc_analyzer import (
     fetch_latest_10k_url,
     fetch_filing_url_for_period,
     period_to_year,
+    period_to_quarter,
     clean_num,
 )
 
@@ -143,6 +144,44 @@ def _retry_get_content(url: str, retries: int = 6, sleep_s: int = 3):
             last = e
             time.sleep(sleep_s)
     raise RuntimeError(f'fetch failed after retries: {last}')
+
+
+def _fetch_period_url_ocsl(cik: str, period: str):
+    """OCSL override: prefer 10-Q for requested period when available."""
+    y = period_to_year(period)
+    q = period_to_quarter(period)
+    res = requests.get(f"https://data.sec.gov/submissions/CIK{cik}.json", headers=get_headers(), timeout=60)
+    res.raise_for_status()
+    filings = res.json()['filings']['recent']
+
+    exact_10q = []
+    exact_any = []
+    for i, form in enumerate(filings.get('form', [])):
+        if form not in ('10-Q', '10-K'):
+            continue
+        report_date = str(filings.get('reportDate', [''])[i] or '')
+        if not report_date:
+            continue
+        try:
+            ry = int(report_date[:4])
+            rq = (int(report_date[5:7]) - 1) // 3 + 1
+        except Exception:
+            continue
+        if ry == y and rq == q:
+            rec = (str(filings.get('filingDate', [''])[i]), i)
+            exact_any.append(rec)
+            if form == '10-Q':
+                exact_10q.append(rec)
+
+    pool = exact_10q if exact_10q else exact_any
+    if pool:
+        pool.sort(key=lambda x: x[0], reverse=True)
+        idx = pool[0][1]
+        acc = filings['accessionNumber'][idx].replace('-', '')
+        doc = filings['primaryDocument'][idx]
+        return f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{acc}/{doc}"
+
+    return fetch_filing_url_for_period(cik, period)
 
 
 def _pick_num(vals, idx):
@@ -286,16 +325,12 @@ def _parse_obdc_year(url: str, target_year: int) -> pd.DataFrame:
         amort_cols = colmap['amort_cols']
         fair_cols = colmap['fair_cols']
 
-        # map by paired order: left block tends older, right block tends current in OBDC 2025 filing
+        # For OCSL, each filing is period-specific; use stable left-to-right pairing.
         pairs = list(zip(amort_cols[:len(fair_cols)], fair_cols[:len(amort_cols)]))
         if not pairs:
             continue
-        if target_year == 2025:
-            amort_candidates = [p[0] for p in pairs[::-1]]
-            fair_candidates = [p[1] for p in pairs[::-1]]
-        else:
-            amort_candidates = [p[0] for p in pairs]
-            fair_candidates = [p[1] for p in pairs]
+        amort_candidates = [p[0] for p in pairs]
+        fair_candidates = [p[1] for p in pairs]
 
         detail = {}
         subtotal = {}
@@ -336,10 +371,11 @@ def _parse_obdc_year(url: str, target_year: int) -> pd.DataFrame:
                 fair = _pick_num(vals, c)
                 if fair is not None:
                     break
-            if face is None and fair is None:
+            # Require a valid face value row; fair can be missing and treated as 0.
+            if face is None:
                 continue
 
-            f = 0.0 if face is None else face
+            f = face
             r = 0.0 if fair is None else fair
 
             if comp_blank and inv_blank:
@@ -396,15 +432,23 @@ def analyze(ticker, periodA=None, periodB=None):
     equity_usd = get_shareholder_equity(cik) or 1000000000
 
     # Single-file policy: use latest 10-K and extract both 2025 and 2024 from that filing.
+    fallback_notes = []
     if periodA and periodB:
         year_a = period_to_year(periodA)
         year_b = period_to_year(periodB)
-        url_a = fetch_filing_url_for_period(cik, periodA)
-        url_b = fetch_filing_url_for_period(cik, periodB)
+        url_a, resolved_a, fb_a = fetch_filing_url_for_period(cik, periodA, allow_fallback=True, return_meta=True)
+        url_b, resolved_b, fb_b = fetch_filing_url_for_period(cik, periodB, allow_fallback=True, return_meta=True)
+        if fb_a:
+            fallback_notes.append(f"periodA 请求 {periodA} 不可用，已回退到最近可用期 {resolved_a}")
+        if fb_b:
+            fallback_notes.append(f"periodB 请求 {periodB} 不可用，已回退到最近可用期 {resolved_b}")
     else:
         year_a, year_b = 2025, 2024
         url_a = fetch_latest_10k_url(cik, filing_year=2026)
         url_b = url_a
+
+    dispA = periodA if periodA else '2025'
+    dispB = periodB if periodB else '2024'
 
     df25 = _parse_obdc_year(url_a, year_a).rename(columns={'Face': 'Face_2025', 'Fair': 'Fair_2025', 'CompanyKey': 'CompanyKey_2025'})
     df24 = _parse_obdc_year(url_b, year_b).rename(columns={'Face': 'Face_2024', 'Fair': 'Fair_2024', 'CompanyKey': 'CompanyKey_2024'})
@@ -431,13 +475,13 @@ def analyze(ticker, periodA=None, periodB=None):
 
     merged['CompanyKey'] = merged['DisplayName']
 
-    # Auto-detect unit scale: some filings are already in $ millions, others in $ thousands.
-    # Heuristic: if median face is large, treat as thousands and convert to millions.
-    scale = 1000 if merged['Face_2025'].median() > 2000 else 1
-    merged['Face_2025_M'] = merged['Face_2025'] / scale
-    merged['Fair_2025_M'] = merged['Fair_2025'] / scale
-    merged['Face_2024_M'] = merged['Face_2024'] / scale
-    merged['Fair_2024_M'] = merged['Fair_2024'] / scale
+    # OCSL filings can mix million-scale and thousand-scale fragments in parsed tables.
+    # Normalize per-row: treat values >1000 as thousand-dollar units.
+    norm = lambda x: (x / 1000.0) if pd.notna(x) and float(x) > 1000 else float(x)
+    merged['Face_2025_M'] = merged['Face_2025'].apply(norm)
+    merged['Fair_2025_M'] = merged['Fair_2025'].apply(norm)
+    merged['Face_2024_M'] = merged['Face_2024'].apply(norm)
+    merged['Fair_2024_M'] = merged['Fair_2024'].apply(norm)
 
     threshold_m = (equity_usd / 1000000) * 0.002
     merged = merged[merged['Face_2025_M'] > threshold_m]
@@ -462,10 +506,12 @@ def analyze(ticker, periodA=None, periodB=None):
         'Face_2024_fmt', 'Fair_2024_fmt', 'ratio_2024_fmt', 'ratio_change_fmt', '业务简介'
     ]]
     show.columns = [
-        '公司名', '2025年face value（金额百万美元，下同）', '2025年fair value', '2025年face/fair（用百分比表示）',
-        '2024年face', '2024年fair', '2024年face/fair（用百分比表示）', '过去一年face/fair变化', '公司主要业务的一句话简介'
+        '公司名', f'{dispA} face value（金额百万美元，下同）', f'{dispA} fair value', f'{dispA} face/fair（用百分比表示）',
+        f'{dispB} face', f'{dispB} fair', f'{dispB} face/fair（用百分比表示）', '过去一年face/fair变化', '公司主要业务的一句话简介'
     ]
 
+    if fallback_notes:
+        print('\n' + '；'.join(fallback_notes))
     print('\n' + tabulate(show, headers='keys', tablefmt='pipe', showindex=False))
 
 

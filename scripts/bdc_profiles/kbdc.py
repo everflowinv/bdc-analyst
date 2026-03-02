@@ -411,6 +411,9 @@ def analyze(ticker, periodA=None, periodB=None):
         url_a = fetch_latest_10k_url(cik, filing_year=2026)
         url_b = url_a
 
+    dispA = periodA if periodA else '2025'
+    dispB = periodB if periodB else '2024'
+
     df25 = _parse_obdc_year(url_a, year_a).rename(columns={'Face': 'Face_2025', 'Fair': 'Fair_2025', 'CompanyKey': 'CompanyKey_2025'})
     df24 = _parse_obdc_year(url_b, year_b).rename(columns={'Face': 'Face_2024', 'Fair': 'Fair_2024', 'CompanyKey': 'CompanyKey_2024'})
 
@@ -469,8 +472,8 @@ def analyze(ticker, periodA=None, periodB=None):
         'Face_2024_fmt', 'Fair_2024_fmt', 'ratio_2024_fmt', 'ratio_change_fmt', '业务简介'
     ]]
     show.columns = [
-        '公司名', '2025年face value（金额百万美元，下同）', '2025年fair value', '2025年face/fair（用百分比表示）',
-        '2024年face', '2024年fair', '2024年face/fair（用百分比表示）', '过去一年face/fair变化', '公司主要业务的一句话简介'
+        '公司名', f'{dispA} face value（金额百万美元，下同）', f'{dispA} fair value', f'{dispA} face/fair（用百分比表示）',
+        f'{dispB} face', f'{dispB} fair', f'{dispB} face/fair（用百分比表示）', '过去一年face/fair变化', '公司主要业务的一句话简介'
     ]
 
     if fallback_notes:
